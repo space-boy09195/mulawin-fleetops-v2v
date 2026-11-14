@@ -850,8 +850,13 @@ const OpsHead = {
             (options[index + (event.key === 'ArrowDown' ? 1 : -1)] || (event.key === 'ArrowDown' ? options[0] : routeSearch))?.focus();
           }
         };
-        card.addEventListener('pointerdown', event => {
+        ctx.el.addEventListener('pointerdown', event => {
           if (!routePicker.contains(event.target)) closeRoutePicker();
+        });
+        const routeLabel = card.querySelector('label[for="' + pick.id + '"]');
+        if (routeLabel) routeLabel.addEventListener('click', event => {
+          event.preventDefault();
+          routeToggle.click();
         });
         const truckField = card.querySelector('[name=truck_type]');
         const dispatcher = card.querySelector('[name=dispatcher_assignment]');
@@ -978,7 +983,14 @@ const OpsHead = {
         const schedule=ctx.el.querySelector('[name=scheduled_at]');
         if(schedule.value&&(schedule.value<schedule.min||schedule.value>schedule.max))return error('Use an allowed schedule.');
         const invalid = [...ctx.el.querySelectorAll('input,select,textarea')].find(input => !['dispatcher_assignment','responsible_dispatcher_id'].includes(input.name) && !input.disabled && !input.checkValidity());
-        if (invalid) { invalid.closest('details').open = true; invalid.reportValidity(); return; }
+        if (invalid) {
+          invalid.closest('details').open = true;
+          if (invalid.name === 'client_route_id') {
+            ctx.el.querySelector('.oh-route-picker-toggle')?.focus();
+            return error('Choose an approved route for this trip.');
+          }
+          invalid.reportValidity(); return;
+        }
         const missingDispatcher = [entry].find(e => !dispatcherOptions(e.data.truck_type).some(([value]) => value === e.data.dispatcher_assignment));
         if(missingDispatcher){const card=ctx.el.querySelector(`[data-entry="${missingDispatcher.id}"]`), select=card.querySelector('[name=dispatcher_assignment]'), feedback=card.querySelector('[data-dispatcher-error]');card.open=true;select.classList.add('is-invalid');select.setAttribute('aria-invalid','true');feedback.hidden=false;feedback.style.display='block';select.focus();return error('Choose an available dispatcher shift for every trip entry.');}
         if(!accountOptions(entry.data).length)return error('No active Dispatcher account exists for the selected group and shift. Ask Admin to configure an authorized account.');
