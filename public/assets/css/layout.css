@@ -396,7 +396,7 @@ textarea.form-control { min-height: 64px; }
 
 
 
-.content { padding: 22px 24px 48px; width: 100%; max-width: 1480px; }
+.content { padding: 22px 24px 48px; width: 100%; max-width: none; }
 
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 
@@ -602,7 +602,7 @@ a:hover { color: var(--rpm-brand-strong); }
 
 ::selection { background: #cdeecf; }
 
-.content { max-width: 1500px; min-width: 0; padding: 18px clamp(14px, 2vw, 28px) 40px; }
+.content { max-width: none; width: 100%; min-width: 0; padding: 18px clamp(14px, 2vw, 28px) 40px; }
 
 .page-head { gap: 10px 16px; margin-bottom: 14px; }
 

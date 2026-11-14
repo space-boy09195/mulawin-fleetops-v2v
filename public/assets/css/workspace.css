@@ -279,7 +279,7 @@
 .ref-app .crumb-page { color: #30473c; font-size: 12px; font-weight: 700; }
 
 /* ---------- page container and header */
-#pageContent.ref-scope { max-width: 1360px; margin: 0 auto; padding: 24px; color: var(--rf-ink); font-size: 14px; }
+#pageContent.ref-scope { max-width: none; margin: 0; padding: 24px; color: var(--rf-ink); font-size: 14px; }
 #pageContent.ref-scope .page-head, #pageContent.ref-scope .page-head.rpm-page-head-scrolled { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
   padding: 0; margin: 0 0 19px; background: none; border: 0; box-shadow: none; position: static; }
 #pageContent.ref-scope .page-title { margin: 0 0 5px; color: var(--rf-ink); font-size: 24px; font-weight: 700; letter-spacing: -.6px; }
