@@ -12,6 +12,6 @@ Options -Indexes
 <IfModule mod_alias.c>
  RedirectMatch 403 "(?i)/\.(?!well-known(/|$))"
 </IfModule>
-<FilesMatch "(?i)^(\.env.*|\.gitignore|.*\.sql|.*\.log|.*\.txt|.*\.md|.*\.csv|.*\.json|.*\.py|.*\.bat|.*\.bak)$">
+<FilesMatch "(?i)^(\.env.*|\.gitignore|.*\.sql|.*\.log|.*\.txt|.*\.md|.*\.csv|.*\.json|.*\.py|.*\.bat|.*\.bak|LocalValetDriver\.php|phpunit\.xml(\.dist)?|composer\.(json|lock))$">
  Require all denied
 </FilesMatch>

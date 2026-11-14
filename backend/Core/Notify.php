@@ -94,7 +94,7 @@ final class Notify {
                 self::roles($p, ['admin', 'operations_head'], 'Driver license', $c['full_name'] . ' license expires on ' . $c['license_expiry'], 'crew', 'lic-' . $c['id'] . '-' . $today);
             }
             foreach (many($p, 'SELECT id, part_number, description, quantity_on_hand, reorder_level FROM parts WHERE active=1 AND reorder_level > 0 AND quantity_on_hand <= reorder_level') as $pt) {
-                self::roles($p, ['purchasing'], 'Low stock', $pt['part_number'] . ' ' . $pt['description'] . ': ' . $pt['quantity_on_hand'] . ' left (reorder level ' . $pt['reorder_level'] . ')', 'purchasing', 'stock-' . $pt['id'] . '-' . $today);
+                self::roles($p, ['purchasing'], 'Low stock', $pt['part_number'] . ' ' . $pt['description'] . ': ' . $pt['quantity_on_hand'] . ' left (reorder level ' . $pt['reorder_level'] . ')', 'inventory', 'stock-' . $pt['id'] . '-' . $today);
             }
         } catch (Throwable $e) { error_log('dailyReminders failed: ' . $e->getMessage()); }
     }

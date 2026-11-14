@@ -1,5 +1,12 @@
 <?php
-/** Attendance sessions govern readiness; Day/Night helpers below label legacy reporting buckets only. */
+/*
+ * Crew attendance (integrated luis-maintenance-ui + kenneth):
+ *  - Admin marks drivers/helpers/mechanics Present/Absent once per calendar date in attendance_daily (DAILY_ATTENDANCE_V1:
+ *    dayFor/dayText/planningDay; no permanent Day/Night shifts).
+ *  - Dispatch readiness uses Dispatcher Time In/Out sessions (DispatcherAttendance); an Admin "Absent" mark in
+ *    attendance_daily still blocks Time In and dispatch.
+ *  - shiftFor/shiftText/planningShift only label legacy Day/Night reporting buckets and session rows.
+ */
 declare(strict_types=1);
 core('Settings');
 
@@ -92,7 +99,7 @@ final class CrewAttendance {
             $issue=$absent?'Absent':($present?null:'Not Timed In');
             $crew[]=['id'=>(int)$pe['id'],'name'=>$pe['full_name'],'role'=>$role,'duty_shift'=>null,'status'=>$absent?'Absent':($present?'Present':'Not Timed In'),'issue'=>$issue,'problem'=>$issue?$pe['full_name'].' ('.$role.'): '.$issue.'. Correct attendance before new dispatch.':null];
         }
-        return ['shift'=>self::shiftFor($ts),'crew'=>$crew];
+        return ['shift'=>self::shiftFor($ts),'day'=>self::dayFor($ts),'crew'=>$crew];
     }
 
     /**
@@ -105,6 +112,25 @@ final class CrewAttendance {
             if($issues)$out[]=['trip_id'=>(int)$trip['id'],'trip_ref'=>$trip['trip_ref'],'scheduled_at'=>$trip['scheduled_at'],'status'=>$trip['status'],'scheduled_shift'=>'Open attendance sessions','issues'=>$issues];
         }
         return ['mode'=>self::modeName(),'unassigned'=>[],'trips'=>$out]; // No permanent shifts to backfill.
+    }
+
+    /** DAILY_ATTENDANCE_V1: the attendance duty date (calendar date, Philippine time) of a moment. */
+    public static function dayFor(?int $ts = null): array {
+        return ['date' => date('Y-m-d', $ts ?? time())];
+    }
+    /** Hour the Admin bell starts reminding about today's daily attendance. */
+    public static function reminderHour(): int {
+        return max(0, min(23, (int)Settings::value('attendance_day_start_hour')));
+    }
+    /** "Nov 8, 2026". */
+    public static function dayText(array $s): string {
+        return date('M j, Y', strtotime($s['date']));
+    }
+    /** The date that decides crew for a trip not dispatched yet: its scheduled date, or today once overdue. */
+    public static function planningDay(array $t, ?int $now = null): array {
+        $now ??= time();
+        $ts = strtotime((string)$t['scheduled_at']) ?: $now;
+        return self::dayFor($ts < $now ? $now : $ts);
     }
 
     /**

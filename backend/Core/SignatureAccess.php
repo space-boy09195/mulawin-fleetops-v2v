@@ -15,10 +15,11 @@ final class SignatureAccess {
         $role = (string)($viewer['role'] ?? '');
         switch ($recordType) {
             case 'purchase_order':
-                if (!Access::canOpen($viewer, 'purchasing')) return false;
+                if (!Access::canOpen($viewer, 'purchase_orders')) return false;
                 return self::exists('SELECT id FROM purchase_orders WHERE id=? AND (requested_by=? OR decided_by=?) LIMIT 1', [$recordId, $signerId, $signerId]);
             case 'part_request':
-                if (!Access::canOpen($viewer, 'purchasing')) return false;
+                // Purchasing fulfils requests; Motorpool prints the request form of its own repairs.
+                if (!Access::canOpen($viewer, 'parts_requests') && $role !== 'motorpool') return false;
                 return self::exists('SELECT id FROM part_requests WHERE id=? AND (requested_by=? OR processed_by=?) LIMIT 1', [$recordId, $signerId, $signerId]);
             case 'fund_request':
                 if (!Access::canOpen($viewer, 'funds')) return false;

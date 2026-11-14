@@ -79,7 +79,7 @@ $n = 0;
 /** New confirmed (Pre-Assigned) trip; the schedule is then set directly to test the windows. */
 $newTrip = function (int $minutesAhead) use ($ops, $cid, $p, $at, &$n): int {
     $n++;
-    $r = Trips::action($ops, 'create', ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "PICKUP $n", 'delivery_point' => "DELIVERY $n",
+    $r = test_create_planned_trip($ops, ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "PICKUP $n", 'delivery_point' => "DELIVERY $n",
         'scheduled_at' => date('Y-m-d\TH:i', time() + 3 * 86400), 'distance_km' => '25.00']);
     run($p, 'UPDATE trips SET scheduled_at=? WHERE id=?', [$at($minutesAhead), $r['trip_id']]);
     return (int)$r['trip_id'];
@@ -123,7 +123,7 @@ section('B. Planning and approval stay allowed early');
 $id = $newTrip(3 * 1440);   // three days ahead
 ok($T($id)['status'] === 'Pre-Assigned' && $T($id)['vehicle_id'] !== null, 'trip three days ahead: created, confirmed and auto-assigned');
 $t = $T($id);
-Trips::action($ops, 'edit', ['trip_id' => $id, 'pickup_point' => 'NEW PICKUP', 'delivery_point' => $t['delivery_point'], 'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'distance_km' => '26.00']);
+Trips::action($ops, 'edit', ['trip_id' => $id, 'pickup_point' => 'NEW PICKUP', 'delivery_point' => $t['delivery_point'], 'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'distance_km' => '26.00', 'distance_override_reason' => 'Detour to the new pickup point']);
 ok($T($id)['pickup_point'] === 'NEW PICKUP', 'Operations Head can still edit the details before dispatch (#27)');
 Trips::action($wvd, 'edit', ['trip_id' => $id, 'booking_reference' => 'BK-EARLY']);
 ok($T($id)['booking_reference'] === 'BK-EARLY', 'dispatcher can still fill in booking details early');
@@ -298,6 +298,7 @@ $ev = one($p, "SELECT from_status, to_status, notes FROM trip_events WHERE trip_
 ok($ev && $ev['from_status'] === 'Ready for Dispatch' && $ev['to_status'] === 'Pre-Assigned' && str_contains((string)$ev['notes'], 'Philippine time'), 'reset written to the trip history with the times', json_encode($ev));
 $after = $snap($id);
 ok($after['trip'] == $before['trip'], 'assignment, route distance, booking and attempt unchanged by the reset');
+fails(fn() => Trips::action($ops, 'edit', ['trip_id' => $id, 'pickup_point' => $T($id)['pickup_point'], 'delivery_point' => $T($id)['delivery_point'], 'scheduled_at' => date('Y-m-d\TH:i', strtotime('+3 days')), 'distance_km' => $T($id)['distance_km'], 'client_route_id' => '']), 'an edit cannot remove the approved route (same rule as planning)', 400);
 ok($after['fund'] == $before['fund'] && $after['fund'][0]['status'] === 'Released', 'Released fund unchanged (same row, amount, release time)');
 ok($after['holds'] == $before['holds'], 'truck and crew holds unchanged');
 ok($after['inspection'] == $before['inspection'], 'old checklist record kept (not deleted)');
@@ -324,7 +325,7 @@ $setting('checklist_lead_hours', null);
 // Edits that do not change the schedule never reset.
 $id = $readyTrip(60);
 $t = $T($id);
-Trips::action($ops, 'edit', ['trip_id' => $id, 'pickup_point' => 'MOVED GATE', 'delivery_point' => $t['delivery_point'], 'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'distance_km' => '30.00']);
+Trips::action($ops, 'edit', ['trip_id' => $id, 'pickup_point' => 'MOVED GATE', 'delivery_point' => $t['delivery_point'], 'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'distance_km' => '30.00', 'distance_override_reason' => 'Gate moved; longer access road']);
 Trips::action($wvd, 'edit', ['trip_id' => $id, 'booking_reference' => 'BK-READY']);
 ok($T($id)['status'] === 'Ready for Dispatch', 'Ready trip: edits without a schedule change (Ops details, dispatcher booking) keep the checklist');
 $id = $newTrip(60);
@@ -345,13 +346,14 @@ fails(fn() => Trips::action($wvd, 'dispatch', ['trip_id' => $id]), 'checklist do
 $id = $readyTrip(60);
 $t = $T($id);
 $free = (int)one($p, "SELECT id FROM vehicles WHERE truck_type='Wing Van' AND status='Available' AND id NOT IN (SELECT resource_id FROM trip_assignments WHERE resource_type='vehicle') LIMIT 1")['id'];
-Trips::action($ops, 'reassign', ['trip_id' => $id, 'vehicle_id' => $free, 'driver_id' => $t['driver_id'], 'helper_id' => $t['helper_id'], 'reason' => 'Truck swap']);
-ok($T($id)['status'] === 'Pre-Assigned', 'truck replacement after the checklist: back to Pre-Assigned (rule unchanged)');
+// kenneth: independent Ops Head truck/crew overrides are retired (Dispatcher fixed-pair assignment happens before the checklist).
+fails(fn() => Trips::action($ops, 'reassign', ['trip_id' => $id, 'vehicle_id' => $free, 'driver_id' => $t['driver_id'], 'helper_id' => $t['helper_id'], 'reason' => 'Truck swap']), 'truck replacement after the checklist is refused (override retired)', 409);
+ok($T($id)['status'] === 'Ready for Dispatch' && (int)$T($id)['vehicle_id'] === (int)$t['vehicle_id'], 'refused replacement leaves the checked truck and status unchanged');
 $id = $readyTrip(60);
 $t = $T($id);
 $h = (int)one($p, "SELECT id FROM personnel WHERE person_type='Helper' AND id NOT IN (SELECT resource_id FROM trip_assignments WHERE resource_type='person') LIMIT 1")['id'];
-Trips::action($ops, 'reassign', ['trip_id' => $id, 'vehicle_id' => $t['vehicle_id'], 'driver_id' => $t['driver_id'], 'helper_id' => $h, 'reason' => 'Helper sick']);
-ok($T($id)['status'] === 'Pre-Assigned', 'crew replacement after the checklist: back to Pre-Assigned (rule unchanged)');
+fails(fn() => Trips::action($ops, 'reassign', ['trip_id' => $id, 'vehicle_id' => $t['vehicle_id'], 'driver_id' => $t['driver_id'], 'helper_id' => $h, 'reason' => 'Helper sick']), 'crew replacement after the checklist is refused (override retired)', 409);
+ok($T($id)['status'] === 'Ready for Dispatch' && (int)$T($id)['helper_id'] === (int)$t['helper_id'], 'refused replacement leaves the checked crew and status unchanged');
 
 section('M. KNOWN GAP (documented, policy pending): late dispatch without a schedule edit');
 $id = $newTrip(-3 * 1440);                           // scheduled 3 days ago, never edited

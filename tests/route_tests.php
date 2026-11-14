@@ -13,7 +13,7 @@
  *    B. Role permissions (actions and page access)
  *    C. Route request validation and normalization
  *    D. Rate entry validation
- *    E. Approval / rejection (new route vs revision), separation of duties
+ *    E. Approval / rejection (new route vs revision), Admin-only rate decision
  *    F. Rate revision safety: atomic supersede, rollback on failure, concurrent approval
  *    G. Duplicate prevention (application and database keys), truck types, directional routes
  *    H. Selectable routes, withdraw, deactivate, history
@@ -194,6 +194,26 @@ $users['ops2'] = ['id' => $ops2, 'username' => 'ops2', 'email' => 'ops2@example.
 $U = fn(string $r) => $users[$r];
 $act = fn(string $role, string $action, array $d) => Routes::action($users[$role], $action, $d);
 
+// Imported historical rows only: new Head Management entries activate immediately.
+// Keep the legacy decision, rollback and concurrency cases without inventing a
+// second approval step in today's workflow. test_guard above owns this database.
+$legacyPending = function (int $routeId, string $amount, string $role = 'admin', string $notes = '') use ($p, $users): int {
+    return transaction(function (PDO $p) use ($routeId, $amount, $role, $notes, $users): int {
+        $r = one($p, 'SELECT * FROM client_routes WHERE id=?', [$routeId]);
+        $version = 1 + (int)one($p, 'SELECT MAX(version_no) AS n FROM client_route_rates WHERE route_id=?', [$routeId])['n'];
+        $id = insert($p, 'client_route_rates', ['route_id'=>$routeId,'version_no'=>$version,'rate_type'=>'Flat',
+            'rate_amount'=>$amount,'status'=>'Pending Approval','entered_by'=>$users[$role]['id'],'entry_notes'=>$notes]);
+        $revision = $r['status'] === 'Approved';
+        if (!$revision) run($p, "UPDATE client_routes SET status='Pending Approval' WHERE id=?", [$routeId]);
+        $event = new ReflectionMethod(Routes::class, 'event');
+        $event->invoke(null, $p, $users[$role]['id'], $routeId, $id,
+            $revision ? 'rate revision entered' : 'rate entered', $r['status'], $revision ? 'Approved' : 'Pending Approval', 'Historical pending fixture');
+        Notify::roles($p, ['admin'], 'Route approval', 'Historical pending fixture', 'routes', 'route-approve-'.$id);
+        return $id;
+    });
+};
+
+
 $client = fn(string $name, string $status) => insert($p, 'clients', ['company_name' => $name, 'status' => $status, 'created_by' => $users['operations_head']['id']]);
 $cActive = $client('ABC LOGISTICS CORP', 'Active');
 $cPending = $client('PENDING RATE INC', 'Pending Rate');
@@ -227,8 +247,17 @@ foreach (array_keys(ROLE_LABELS) as $role) {
     if ($role === 'admin') continue;
     fails(fn() => $act($role, 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '12500']), "rate entry refused for $role", 403);
 }
-$rate1 = (int)$act('admin', 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '12,500.00'])['rate_id'];
-ok($rate1 > 0, 'Admin can enter the rate');
+$currentRoute = (int)$act('operations_head', 'request', $req(['origin'=>'Current contract depot','destination'=>'Current contract destination']))['route_id'];
+$currentRate = (int)$act('admin', 'rate_enter', ['route_id'=>$currentRoute,'rate_type'=>'Flat','rate_amount'=>'12,500.00'])['rate_id'];
+ok(one($p, 'SELECT status FROM client_routes WHERE id=?', [$currentRoute])['status']==='Approved'
+    && one($p, 'SELECT status FROM client_route_rates WHERE id=?', [$currentRate])['status']==='Approved', 'Head Management contract entry immediately approves route and rate');
+ok(in_array($currentRoute, array_map('intval', array_column(Routes::selectableFor($p, $cActive), 'id')), true), 'Operations Head can select current contract without another approval');
+fails(fn()=>$act('admin','decide',['rate_id'=>$currentRate,'decision'=>'approve']), 'current contract does not require a second approval', 409, 'already decided');
+$currentRevision = (int)$act('admin','rate_enter',['route_id'=>$currentRoute,'rate_type'=>'Flat','rate_amount'=>'13000'])['rate_id'];
+ok(one($p,'SELECT status FROM client_route_rates WHERE id=?',[$currentRate])['status']==='Superseded'
+    && one($p,'SELECT status FROM client_route_rates WHERE id=?',[$currentRevision])['status']==='Approved', 'current contract revision atomically supersedes prior rate immediately');
+$rate1 = $legacyPending($route1, '12500');
+ok($currentRate > 0, 'Admin can enter the rate');
 foreach (array_keys(ROLE_LABELS) as $role) {
     if ($role === 'admin') continue;
     fails(fn() => $act($role, 'decide', ['rate_id' => $rate1, 'decision' => 'approve']), "approval refused for $role", 403);
@@ -325,7 +354,7 @@ ok((bool)one($p, 'SELECT id FROM notifications WHERE user_id=? AND dedupe_key=? 
 
 // Reject a NEW route request -> terminal
 $rn = (int)$act('operations_head', 'request', $req(['origin' => 'Tanauan', 'destination' => 'Lipa']))['route_id'];
-$rnr = (int)$act('admin', 'rate_enter', ['route_id' => $rn, 'rate_type' => 'Flat', 'rate_amount' => '4000'])['rate_id'];
+$rnr = $legacyPending($rn, '4000');
 $act('admin', 'decide', ['rate_id' => $rnr, 'decision' => 'reject', 'reason' => 'Not in the contract']);
 $r = one($p, 'SELECT * FROM client_routes WHERE id=?', [$rn]);
 ok($r['status'] === 'Rejected' && $r['closed_reason'] === 'Not in the contract' && (int)$r['closed_by'] === $users['admin']['id'], 'reject new request: route Rejected with reason and person');
@@ -340,9 +369,9 @@ ok($checksums() === $before, 'approvals and rejections did not change trips, bil
 // ---------------------------------------------------------------------
 section('F. Rate revision: reject, approve, rollback, concurrency');
 fails(fn() => $act('admin', 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '12500']), 'revision equal to the current rate refused', 409, 'same');
-$rev1 = (int)$act('admin', 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '13000'])['rate_id'];
+$rev1 = $legacyPending($route1, '13000');
 ok(one($p, 'SELECT status FROM client_routes WHERE id=?', [$route1])['status'] === 'Approved', 'during a revision the route stays Approved');
-fails(fn() => Routes::action($users['admin2'], 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '13100']), 'second pending revision refused (application rule)', 409, 'already has a rate waiting');
+fails(fn() => Routes::action($users['admin2'], 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '13100']), 'second pending revision refused (application rule)', 409, 'legacy rate is still pending');
 $sel = Routes::approvedFor($p, $cActive, 'Container');
 $x = array_values(array_filter($sel, fn($s) => (int)$s['id'] === $route1))[0] ?? null;
 ok($x && $x['rate_amount'] === '12500.00' && (int)$x['rate_id'] === $rate1, 'during a revision the OLD approved rate is the one in use');
@@ -353,7 +382,7 @@ ok($o['status'] === 'Approved' && $o['rate_amount'] === '12500.00' && $o['effect
 ok(one($p, 'SELECT status FROM client_route_rates WHERE id=?', [$rev1])['status'] === 'Rejected', 'rejected revision: only the revision is Rejected');
 
 // Approve a revision
-$rev2 = (int)Routes::action($users['admin2'], 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '13500', 'notes' => '2027 contract'])['rate_id'];
+$rev2 = $legacyPending($route1, '13500', 'admin2', '2027 contract');
 $act('admin', 'decide', ['rate_id' => $rev2, 'decision' => 'approve']);
 $o = one($p, 'SELECT * FROM client_route_rates WHERE id=?', [$rate1]); $n = one($p, 'SELECT * FROM client_route_rates WHERE id=?', [$rev2]);
 ok($o['status'] === 'Superseded' && $o['effective_to'] !== null && $o['rate_amount'] === '12500.00', 'approved revision: old rate Superseded, amount kept, effective_to set');
@@ -363,7 +392,7 @@ try { run($p, "UPDATE client_route_rates SET status='Approved' WHERE id=?", [$ra
 catch (PDOException $e) { ok(str_contains($e->getMessage(), 'uq_route_rate_current'), 'database refuses two approved rates for one route (uq_route_rate_current)'); }
 
 // Rollback: make activation of the next revision fail AFTER the old rate was superseded -> everything rolled back.
-$rev3 = (int)$act('admin', 'rate_enter', ['route_id' => $route1, 'rate_type' => 'Flat', 'rate_amount' => '14000'])['rate_id'];
+$rev3 = $legacyPending($route1, '14000');
 $routeTriggerReady = true;
 try { $p->exec("CREATE TRIGGER test_fail_activation BEFORE UPDATE ON client_route_rates FOR EACH ROW
           BEGIN IF NEW.id = $rev3 AND NEW.status = 'Approved' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'simulated failure'; END IF; END"); }
@@ -404,7 +433,6 @@ fails(fn() => $act('operations_head', 'request', $req(['origin' => '  tanauan;BA
 $wv = $act('operations_head', 'request', $req(['truck_type' => 'Wing Van']));
 ok($wv['route_id'] > 0, 'same route with another truck type (Wing Van) allowed');
 $wvr = (int)$act('admin', 'rate_enter', ['route_id' => $wv['route_id'], 'rate_type' => 'Flat', 'rate_amount' => '9800'])['rate_id'];
-$act('admin', 'decide', ['rate_id' => $wvr, 'decision' => 'approve']);
 $both = Routes::approvedFor($p, $cActive);
 $tm = array_values(array_filter($both, fn($s) => $s['origin_label'] === 'TANAUAN, BATANGAS' && $s['destination_label'] === 'MALVAR, BATANGAS'));
 ok(count($tm) === 2 && count(array_unique(array_column($tm, 'rate_amount'))) === 2, 'Container and Wing Van of the same route have different approved rates');
@@ -440,13 +468,13 @@ ok(one($p, 'SELECT status FROM client_routes WHERE id=?', [$wd])['status'] === '
 fails(fn() => $act('operations_head', 'withdraw', ['route_id' => $route1, 'reason' => 'x']), 'an Approved route cannot be withdrawn', 409);
 // withdraw with a pending rate -> the pending rate is closed too
 $wp = (int)$act('operations_head', 'request', $req(['origin' => 'Batangas Port', 'destination' => 'Sto Tomas']))['route_id'];
-$wpr = (int)$act('admin', 'rate_enter', ['route_id' => $wp, 'rate_type' => 'Flat', 'rate_amount' => '7000'])['rate_id'];
+$wpr = $legacyPending($wp, '7000');
 $act('operations_head', 'withdraw', ['route_id' => $wp, 'reason' => 'Duplicate of another request']);
 ok(one($p, 'SELECT status FROM client_route_rates WHERE id=?', [$wpr])['status'] === 'Rejected', 'withdrawing closes the pending rate');
 fails(fn() => $act('admin', 'decide', ['rate_id' => $wpr, 'decision' => 'approve']), 'a rate of a withdrawn route cannot be approved', 409);
 
 $wvId = (int)$wv['route_id'];
-$pend = (int)$act('admin', 'rate_enter', ['route_id' => $wvId, 'rate_type' => 'Flat', 'rate_amount' => '9900'])['rate_id'];
+$pend = $legacyPending($wvId, '9900');
 fails(fn() => $act('admin', 'deactivate', ['route_id' => $wvId]), 'deactivate without a reason refused');
 $act('admin', 'deactivate', ['route_id' => $wvId, 'reason' => 'Contract ended']);
 ok(one($p, 'SELECT status FROM client_routes WHERE id=?', [$wvId])['status'] === 'Inactive', 'route deactivated');
@@ -483,7 +511,7 @@ $state = function (int $routeId, int $rateId) use ($p): array {
 // 1) New route: request (eligible) -> rate -> client deactivated -> approval blocked
 $cJ = $client('LATE DEACTIVATION CORP', 'Active');
 $jr = (int)$act('operations_head', 'request', $req(['client_id' => $cJ]))['route_id'];
-$jrate = (int)$act('admin', 'rate_enter', ['route_id' => $jr, 'rate_type' => 'Flat', 'rate_amount' => '8000'])['rate_id'];
+$jrate = $legacyPending($jr, '8000');
 run($p, "UPDATE clients SET status='Inactive' WHERE id=?", [$cJ]);
 $snap = $state($jr, $jrate);
 fails(fn() => $act('admin', 'decide', ['rate_id' => $jrate, 'decision' => 'approve']), 'approval blocked when the client became Inactive after the request', 409, 'Cannot approve');
@@ -497,7 +525,7 @@ ok(one($p, 'SELECT status FROM client_routes WHERE id=?', [$jr])['status'] === '
 // Incomplete is also not eligible (policy: Active or Pending Rate)
 $cJ2 = $client('BECAME INCOMPLETE CORP', 'Pending Rate');
 $jr2 = (int)$act('operations_head', 'request', $req(['client_id' => $cJ2]))['route_id'];
-$jrate2 = (int)$act('admin', 'rate_enter', ['route_id' => $jr2, 'rate_type' => 'Flat', 'rate_amount' => '8100'])['rate_id'];
+$jrate2 = $legacyPending($jr2, '8100');
 run($p, "UPDATE clients SET status='Incomplete' WHERE id=?", [$cJ2]);
 fails(fn() => $act('admin', 'decide', ['rate_id' => $jrate2, 'decision' => 'approve']), 'approval blocked for a client that is no longer eligible (Incomplete)', 409, 'Cannot approve');
 run($p, "UPDATE clients SET status='Pending Rate' WHERE id=?", [$cJ2]);
@@ -507,8 +535,7 @@ ok(one($p, 'SELECT status FROM client_routes WHERE id=?', [$jr2])['status'] === 
 $cJ3 = $client('REVISION DEACTIVATION CORP', 'Active');
 $jr3 = (int)$act('operations_head', 'request', $req(['client_id' => $cJ3]))['route_id'];
 $v1 = (int)$act('admin', 'rate_enter', ['route_id' => $jr3, 'rate_type' => 'Flat', 'rate_amount' => '7000'])['rate_id'];
-$act('admin', 'decide', ['rate_id' => $v1, 'decision' => 'approve']);
-$v2 = (int)$act('admin', 'rate_enter', ['route_id' => $jr3, 'rate_type' => 'Flat', 'rate_amount' => '7500'])['rate_id'];
+$v2 = $legacyPending($jr3, '7500');
 run($p, "UPDATE clients SET status='Inactive' WHERE id=?", [$cJ3]);
 $snap = $state($jr3, $v2);
 fails(fn() => $act('admin', 'decide', ['rate_id' => $v2, 'decision' => 'approve']), 'revision approval blocked when the client became Inactive', 409, 'Cannot approve');
@@ -533,9 +560,9 @@ ok(one($p, 'SELECT status FROM client_route_rates WHERE id=?', [$v2])['status'] 
 section('K. approvedFor (record) vs selectableFor (planning eligibility)');
 $cK = $client('PLANNING ELIGIBILITY CORP', 'Active');
 $kr = (int)$act('operations_head', 'request', $req(['client_id' => $cK, 'truck_type' => 'Container']))['route_id'];
-$act('admin', 'decide', ['rate_id' => (int)$act('admin', 'rate_enter', ['route_id' => $kr, 'rate_type' => 'Flat', 'rate_amount' => '6000'])['rate_id'], 'decision' => 'approve']);
+$act('admin', 'rate_enter', ['route_id' => $kr, 'rate_type' => 'Flat', 'rate_amount' => '6000']);
 $kw = (int)$act('operations_head', 'request', $req(['client_id' => $cK, 'truck_type' => 'Wing Van']))['route_id'];
-$act('admin', 'decide', ['rate_id' => (int)$act('admin', 'rate_enter', ['route_id' => $kw, 'rate_type' => 'Flat', 'rate_amount' => '6500'])['rate_id'], 'decision' => 'approve']);
+$act('admin', 'rate_enter', ['route_id' => $kw, 'rate_type' => 'Flat', 'rate_amount' => '6500']);
 $kp = (int)$act('operations_head', 'request', $req(['client_id' => $cK, 'truck_type' => 'Car Carrier']))['route_id'];   // stays Pending Rate
 ok(array_column(Routes::selectableFor($p, $cK), 'id') === array_column(Routes::approvedFor($p, $cK), 'id') && count(Routes::selectableFor($p, $cK)) === 2,
    'Active client: both approved routes are selectable');
@@ -586,7 +613,6 @@ $client2 = $client('REGRESSION CLIENT CORP', 'Active');
 insert($p, 'client_rates', ['client_id'=>$client2,'truck_type'=>'Wing Van','rate_per_km'=>'55.50','minimum_charge'=>'1000','updated_by'=>$users['admin']['id']]);
 $rr = (int)$act('operations_head','request',['client_id'=>$client2,'truck_type'=>'Wing Van','origin'=>'Tanauan','destination'=>'Malvar','distance_km'=>'20'])['route_id'];
 $rateId = (int)$act('admin','rate_enter',['route_id'=>$rr,'rate_type'=>'Flat','rate_amount'=>'99999'])['rate_id'];
-$act('admin','decide',['rate_id'=>$rateId,'decision'=>'approve']);
 $dispatcherId = insert($p,'users',['username'=>'billing_regression_dispatcher','email'=>'billing-regression@example.test',
     'full_name'=>'Billing Regression Dispatcher','password_hash'=>'fixture','role'=>'container_wingvan_dispatcher','shift'=>'Day']);
 $created = Trips::action($users['operations_head'],'create',[
@@ -608,7 +634,6 @@ Actions::load('Clients');
 $cd = Clients::action($users['operations_head'],'details',['id'=>$client2]);
 ok(count($cd['rates'])===1 && $cd['rates'][0]['rate_per_km']==='55.50','historical client per-km rates remain visible');
 $revId = (int)$act('admin','rate_enter',['route_id'=>$rr,'rate_type'=>'Flat','rate_amount'=>'88888'])['rate_id'];
-$act('admin','decide',['rate_id'=>$revId,'decision'=>'approve']);
 BillingDraft::createFor($p,$trip);
 $afterBill = one($p,'SELECT * FROM billings WHERE id=?',[$billId]);
 $afterSnapshot = one($p,'SELECT snapshot_json FROM billing_pricing WHERE billing_id=?',[$billId])['snapshot_json']??null;

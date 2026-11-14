@@ -13,21 +13,20 @@ final class Attendance {
         must($date <= date('Y-m-d'), 'Cannot mark future attendance.', 409);
         return $date;
     }
-    private static function group(array $d): array {
-        $kind = choiceField($d, 'kind', ['Driver', 'Mechanic']);
-        $shift = choiceField($d, 'duty_shift', ['Day', 'Night']);
-        return [$kind,$shift];
+    private static function kind(array $d): string {
+        return choiceField($d, 'kind', ['Driver', 'Mechanic']);
     }
-    private static function roster(PDO $p, string $kind, string $shift, string $date): array {
+    /** DAILY_ATTENDANCE_V1: every ACTIVE person is on the roster of the date (no shift). A duty_shift sent by an old client is ignored. */
+    private static function roster(PDO $p, string $kind, string $date): array {
         if ($kind === 'Driver') {
             // CHECKLIST_42_ATTENDANCE_PHASE2_V1: the crew roster ('Driver' kind, kept for compatibility) lists drivers AND helpers.
             return many($p, "SELECT pe.id, pe.full_name, pe.person_type, pe.availability, am.status, am.marked_at
-              FROM personnel pe LEFT JOIN attendance_marks am ON am.personnel_id=pe.id AND am.duty_date=? AND am.duty_shift=?
-              WHERE pe.active=1 AND pe.person_type IN ('Driver','Helper') ORDER BY pe.person_type, pe.full_name", [$date,$shift]);
+              FROM personnel pe LEFT JOIN attendance_daily am ON am.personnel_id=pe.id AND am.duty_date=?
+              WHERE pe.active=1 AND pe.person_type IN ('Driver','Helper') ORDER BY pe.person_type, pe.full_name", [$date]);
         }
         return many($p, "SELECT mc.id, mc.full_name, mc.availability, am.status, am.marked_at
-          FROM mechanics mc LEFT JOIN attendance_marks am ON am.mechanic_id=mc.id AND am.duty_date=? AND am.duty_shift=?
-          WHERE mc.active=1 ORDER BY mc.full_name", [$date,$shift]);
+          FROM mechanics mc LEFT JOIN attendance_daily am ON am.mechanic_id=mc.id AND am.duty_date=?
+          WHERE mc.active=1 ORDER BY mc.full_name", [$date]);
     }
     public static function action(array $u, string $action, array $d): array {
         if(in_array($action,['dispatcher_list','dispatcher_history','time_in','time_out'],true)){
@@ -43,20 +42,18 @@ final class Attendance {
         };
     }
     private static function listing(array $d): array {
-        $date=self::dateValue($d); [$kind,$shift]=self::group($d);
-        $rows=self::roster(db(),$kind,$shift,$date);
-        return ['rows'=>$rows,'date'=>$date,'shift'=>$shift,'kind'=>$kind,
+        $date=self::dateValue($d); $kind=self::kind($d);
+        $rows=self::roster(db(),$kind,$date);
+        return ['rows'=>$rows,'date'=>$date,'kind'=>$kind,
           'marked'=>count(array_filter($rows,fn($r)=>$r['status']!==null)),'total'=>count($rows),
-          // Phase 2 preparation: crew without a shift are in no roster; Admin assigns their shift in the Masterlist.
-          'unassigned'=>$kind==='Driver' ? CrewAttendance::unassignedCrew(db()) : [],
           'readiness'=>$kind==='Driver' ? CrewAttendance::readiness(db()) : null];
     }
     private static function save(array $u,array $d): array {
-        $date=self::dateValue($d); [$kind,$shift]=self::group($d);
+        $date=self::dateValue($d); $kind=self::kind($d);
         $items=$d['items']??null;
         must(is_array($items) && count($items)<=1000,'Invalid attendance checklist.');
-        return transaction(function(PDO $p) use ($u,$date,$kind,$shift,$items) {
-            $rows=self::roster($p,$kind,$shift,$date);
+        return transaction(function(PDO $p) use ($u,$date,$kind,$items) {
+            $rows=self::roster($p,$kind,$date);
             $valid=array_fill_keys(array_map(fn($r)=>(int)$r['id'],$rows),true);
             $column=$kind==='Driver'?'personnel_id':'mechanic_id';
             $seen=[]; $count=0;
@@ -67,23 +64,23 @@ final class Attendance {
                 $seen[$id]=true;
                 $value=$item['status']??null;
                 must(in_array($value,['Present','Absent',null],true),'Attendance must be Present, Absent or blank.');
-                $old=one($p,"SELECT id,status FROM attendance_marks WHERE duty_date=? AND duty_shift=? AND $column=? FOR UPDATE",[$date,$shift,$id]);
+                $old=one($p,"SELECT id,status FROM attendance_daily WHERE duty_date=? AND $column=? FOR UPDATE",[$date,$id]);
                 if ($value===null) {
-                    if($old){run($p,'DELETE FROM attendance_marks WHERE id=?',[$old['id']]); audit($p,$u['id'],'Attendance',strtolower($kind).' '.$id,"$date $shift attendance cleared");}
+                    if($old){run($p,'DELETE FROM attendance_daily WHERE id=?',[$old['id']]); audit($p,$u['id'],'Attendance',strtolower($kind).' '.$id,"$date attendance cleared");}
                 } elseif($old) {
-                    if ($old['status']!==$value) {run($p,'UPDATE attendance_marks SET status=?,marked_by=?,marked_at=NOW() WHERE id=?',[$value,$u['id'],$old['id']]);
-                      auditWithChanges($p,$u['id'],'Attendance',strtolower($kind).' '.$id,'attendance updated',"$date $shift",['Status'=>$old['status']],['Status'=>$value]);}
+                    if ($old['status']!==$value) {run($p,'UPDATE attendance_daily SET status=?,marked_by=?,marked_at=NOW(),legacy_shifts=NULL WHERE id=?',[$value,$u['id'],$old['id']]);
+                      auditWithChanges($p,$u['id'],'Attendance',strtolower($kind).' '.$id,'attendance updated',$date,['Status'=>$old['status']],['Status'=>$value]);}
                 } else {
-                    run($p,"INSERT INTO attendance_marks (duty_date,duty_shift,$column,status,marked_by) VALUES (?,?,?,?,?)",[$date,$shift,$id,$value,$u['id']]);
-                    auditWithChanges($p,$u['id'],'Attendance',strtolower($kind).' '.$id,'attendance marked',"$date $shift",[],['Status'=>$value]);
+                    run($p,"INSERT INTO attendance_daily (duty_date,$column,status,marked_by) VALUES (?,?,?,?)",[$date,$id,$value,$u['id']]);
+                    auditWithChanges($p,$u['id'],'Attendance',strtolower($kind).' '.$id,'attendance marked',$date,[],['Status'=>$value]);
                 }
-                if ($kind==='Driver' && ($old['status']??null)!==$value) self::absentNotice($p,$id,$date,$shift,$value);
+                if ($kind==='Driver' && ($old['status']??null)!==$value) self::absentNotice($p,$id,$date,$value);
                 if($value!==null)$count++;
             }
             // A full roster must be submitted; otherwise partial saving might hide pending people.
             must(count($items)===count($rows),'The roster changed. Reload Attendance and try again.',409);
-            if($count===count($rows)) Notify::resolve($p,'att-'.$date.'-'.$shift.'-'.$kind);
-            return ['message'=>"$kind $shift attendance saved ($count/".count($rows)." marked)."];
+            if($count===count($rows)) Notify::resolve($p,'att-'.$date.'-'.$kind);
+            return ['message'=>"$kind attendance for $date saved ($count/".count($rows)." marked)."];
         });
     }
     /**
@@ -92,41 +89,34 @@ final class Attendance {
      * current shift. One notice per person / shift / trip (re-opened if the absence is marked again after a correction);
      * resolved when the mark is changed to Present or cleared. Trips and assignments are never changed here.
      */
-    private static function absentNotice(PDO $p, int $personId, string $date, string $shift, ?string $value): void {
-        $prefix = 'att-absent-' . $personId . '-' . $date . '-' . $shift . '-';
+    private static function absentNotice(PDO $p, int $personId, string $date, ?string $value): void {
+        $prefix = 'att-absent-' . $personId . '-' . $date . '-';
         if ($value !== 'Absent') { Notify::resolve($p, $prefix . '*'); return; }
         $trips = many($p, "SELECT t.id, t.trip_ref, t.scheduled_at, a.role FROM trip_assignments a JOIN trips t ON t.id=a.trip_id
                            WHERE a.resource_type='person' AND a.resource_id=? AND t.status IN ('Pre-Assigned','Ready for Dispatch','For Reschedule')", [$personId]);
         if (!$trips) return;
         $name = one($p, 'SELECT full_name FROM personnel WHERE id=?', [$personId])['full_name'] ?? 'Crew';
-        $now = CrewAttendance::shiftFor();
+        $today = CrewAttendance::dayFor()['date'];
         foreach ($trips as $t) {
             $ts = strtotime((string)$t['scheduled_at']);
-            $rel = CrewAttendance::shiftFor($ts);
-            $relevant = ($rel['date'] === $date && $rel['shift'] === $shift) || ($ts < time() && $now['date'] === $date && $now['shift'] === $shift);
+            $relevant = (CrewAttendance::dayFor($ts)['date'] === $date) || ($ts < time() && $today === $date);
             if (!$relevant) continue;
             $key = $prefix . $t['id'];
             run($p, "UPDATE notifications SET state='Unread', resolved_at=NULL, resolved_by=NULL WHERE dedupe_key=? AND state='Resolved'", [$key]);
-            Notify::roles($p, ['operations_head'], 'Assigned crew absent', $name . ' (' . (['driver' => 'Driver', 'driver2' => 'Driver 2', 'helper' => 'Helper'][$t['role']] ?? 'Crew') . ') is marked Absent for the ' . CrewAttendance::shiftText(['date' => $date, 'shift' => $shift])
-                . ' but is assigned to ' . $t['trip_ref'] . ' (scheduled ' . date('M j, g:i A', $ts) . '). Reassign the crew before Confirm Dispatch.', 'trips', $key);
+            Notify::roles($p, ['operations_head'], 'Assigned crew absent', $name . ' (' . (['driver' => 'Driver', 'driver2' => 'Driver 2', 'helper' => 'Helper'][$t['role']] ?? 'Crew') . ') is marked Absent for '
+                . CrewAttendance::dayText(['date' => $date]) . ' but is assigned to ' . $t['trip_ref'] . ' (scheduled ' . date('M j, g:i A', $ts) . '). Reassign the crew before Confirm Dispatch.', 'trips', $key);
         }
     }
 
-    /** Refresh-safe bell reminder. Requires an Admin session and runs after configured shift start. */
+    /** Refresh-safe bell reminder. Requires an Admin session and runs from the configured hour (Philippine time) for today's date. */
     public static function remind(PDO $p): void {
-        // Every shift that has started today plus the shift in progress (a shift that crossed midnight keeps
-        // its start date). Same boundaries as CrewAttendance::shiftFor for both start-hour orderings.
-        $due=CrewAttendance::dueShifts();
-        $noShift=count(CrewAttendance::unassignedCrew($p));
-        if ($noShift>0) Notify::roles($p,['admin'],'Shift not assigned',"$noShift active driver(s)/helper(s) have no Day/Night shift and cannot be marked in Attendance. Assign their shift in the Drivers & Helpers masterlist.",'crew','att-noshift');
-        else Notify::resolve($p,'att-noshift');
-        foreach ($due as [$shift,$date]) {
-            foreach (['Driver','Mechanic'] as $kind) {
-                $rows=self::roster($p,$kind,$shift,$date);
-                $missing=count(array_filter($rows,fn($r)=>$r['status']===null));
-                if($missing>0) Notify::roles($p,['admin'],'Attendance required',"$shift shift: $missing ".($kind==='Driver'?'crew (driver/helper)':$kind)." attendance record(s) not marked for $date.",$kind==='Driver'?'crew':'mechanics','att-'.$date.'-'.$shift.'-'.$kind);
-                else Notify::resolve($p,'att-'.$date.'-'.$shift.'-'.$kind);
-            }
+        if ((int)date('G') < CrewAttendance::reminderHour()) return;
+        $date = CrewAttendance::dayFor()['date'];
+        foreach (['Driver','Mechanic'] as $kind) {
+            $rows=self::roster($p,$kind,$date);
+            $missing=count(array_filter($rows,fn($r)=>$r['status']===null));
+            if($missing>0) Notify::roles($p,['admin'],'Attendance required',"$missing ".($kind==='Driver'?'crew (driver/helper)':$kind)." attendance record(s) not marked for $date.",$kind==='Driver'?'crew':'mechanics','att-'.$date.'-'.$kind);
+            else Notify::resolve($p,'att-'.$date.'-'.$kind);
         }
     }
 }

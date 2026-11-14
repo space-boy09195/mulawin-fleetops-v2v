@@ -57,7 +57,7 @@ $T = fn(int $id) => one($p, 'SELECT * FROM trips WHERE id=?', [$id]);
 $n = 0;
 $trip = function (string $status = 'Pre-Assigned') use ($ops, $cid, $p, &$n): int {
     $n++;
-    $r = Trips::action($ops, 'create', ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "P$n", 'delivery_point' => "D$n", 'scheduled_at' => date('Y-m-d\TH:i', time() + 3600), 'distance_km' => '20']);
+    $r = test_create_planned_trip($ops, ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "P$n", 'delivery_point' => "D$n", 'scheduled_at' => date('Y-m-d\TH:i', time() + 3600), 'distance_km' => '20']);
     if ($status !== 'Pre-Assigned') run($p, 'UPDATE trips SET status=?, dispatched_at=IF(? IN (\'Dispatched\',\'In Transit\',\'Completed\'), DATE_SUB(NOW(), INTERVAL 2 HOUR), dispatched_at) WHERE id=?', [$status, $status, $r['trip_id']]);
     return (int)$r['trip_id'];
 };

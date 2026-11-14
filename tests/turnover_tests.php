@@ -43,14 +43,14 @@ $migration=test_sql('database/migrations/2026-11-12_12_dispatcher_turnover.sql')
 turn_ok((int)one($up,"SELECT COUNT(*) AS n FROM schema_migrations WHERE id IN ('2026-11-11_11_operations_v43','2026-11-12_12_dispatcher_turnover')")['n']===2,'Sequential migrations 11 and 12 record both version markers');
 turn_ok((int)one($up,'SELECT COUNT(*) AS n FROM users WHERE id=?',[$sentinel])['n']===1,'Upgrade preserves existing records and migration is repeatable');
 turn_ok((int)one($up,'SELECT COUNT(*) AS n FROM vehicles')['n']===2&&one($up,'SELECT license_number FROM personnel WHERE id=?',[$upDriver])['license_number']==='UP-LICENSE','Sequential upgrade preserves synthetic master records and license details');
-test_import($up,test_sql('database/migrations/2026-11-13_13_fixed_route_fuel.sql'));
+test_import($up,test_sql('database/migrations/2026-11-13_13_fixed_route_fuel.sql'));test_import($up,test_sql('database/migrations/2026-11-14_14_incident_clearance.sql')); // later migration, once (not repeatable)
 turn_ok(test_fingerprint($p,$fresh)===test_fingerprint($up,$upgrade),'Fresh and upgrade schemas match, including constraints, indexes and foreign keys');
 Actions::load('Trips');Actions::load('Fleet');Actions::load('Attendance');Actions::load('Mechanics');core('DispatcherTurnover');core('Settings');
 $users=[];
-foreach(['ops'=>['operations_head',null],'day'=>['container_wingvan_dispatcher','Day'],'night'=>['container_wingvan_dispatcher','Night'],'other'=>['car_carrier_dispatcher','Night'],'admin'=>['admin',null],'third'=>['container_wingvan_dispatcher','Day']] as $key=>[$role,$shift]){
+foreach(['ops'=>['operations_head',null],'day'=>['container_wingvan_dispatcher','Day'],'night'=>['container_wingvan_dispatcher','Night'],'other'=>['car_carrier_dispatcher','Night'],'admin'=>['admin',null],'third'=>['container_wingvan_dispatcher','Day'],'motor'=>['motorpool',null]] as $key=>[$role,$shift]){
  $id=insert($p,'users',['username'=>'turn_'.$key,'email'=>$key.'@example.test','full_name'=>'Fixture '.$key,'password_hash'=>'fixture','role'=>$role,'shift'=>$shift]);$users[$key]=['id'=>$id,'role'=>$role,'shift'=>$shift];
 }
-[$ops,$day,$night,$other,$admin,$third]=array_values($users);
+[$ops,$day,$night,$other,$admin,$third,$motor]=array_values($users);
 // Exercise database enforcement directly on both the fresh and upgraded definitions.
 foreach(['fresh'=>[$p,$day['id'],$night['id']],'upgrade'=>[$up,$sentinel,insert($up,'users',['username'=>'upgrade_recipient','email'=>'recipient@example.test','full_name'=>'Upgrade recipient','password_hash'=>'fixture','role'=>'container_wingvan_dispatcher','shift'=>'Night'])]] as $schema=>[$connection,$outgoing,$incoming]){
  $base=['outgoing_id'=>$outgoing,'incoming_id'=>$incoming,'dispatcher_role'=>'container_wingvan_dispatcher','status'=>'Accepted','endorsed_at'=>'2026-11-12 10:00:00','accepted_at'=>'2026-11-12 11:00:00','accepted_by'=>$incoming];
@@ -106,9 +106,9 @@ $reverse=Trips::action($night,'turnover_preview',[]);$rid=Trips::action($night,'
 turn_ok((int)one($p,'SELECT version FROM trip_responsibilities WHERE trip_id=?',[$trip])['version']===3,'Reverse turnover extends the responsibility chain without duplicate trips');
 foreach([$driver,$helper] as $pid){$s=Attendance::action($day,'time_in',['personnel_id'=>$pid,'request_key'=>turn_key()]);run($p,'UPDATE dispatcher_attendance_sessions SET time_in=?,duty_date=?,duty_shift=? WHERE id=?',[date('Y-m-d H:i:s',time()-172800),'2026-01-01','Night',$s['session_id']]);}
 turn_ok(DispatcherAttendance::blocker($p,$day,$driver,$trip)===null&&DispatcherAttendance::blocker($p,$night,$helper,$trip)===null,'Shift-free Driver/Helper sessions remain valid across midnight, dates and Dispatcher accounts');
-insert($p,'attendance_marks',['duty_date'=>date('Y-m-d'),'duty_shift'=>'Day','personnel_id'=>$driver,'status'=>'Absent','marked_by'=>$admin['id']]);
+insert($p,'attendance_daily',['duty_date'=>date('Y-m-d'),'personnel_id'=>$driver,'status'=>'Absent','marked_by'=>$admin['id']]); // integrated: Admin daily attendance is the Absent authority
 turn_ok(str_contains((string)DispatcherAttendance::blocker($p,$day,$driver,$trip),'Absent'),'Admin absence conflict blocks assignment despite an open Time In');
-run($p,"UPDATE attendance_marks SET status='Present' WHERE personnel_id=?",[$driver]);
+run($p,"UPDATE attendance_daily SET status='Present' WHERE personnel_id=?",[$driver]);
 turn_ok(DispatcherAttendance::blocker($p,$day,$driver,$trip)===null,'Authorized attendance correction restores otherwise valid eligibility');
 run($p,"UPDATE personnel SET license_expiry='2000-01-01' WHERE id=?",[$driver]);turn_ok(str_contains((string)DispatcherAttendance::blocker($p,$day,$driver,$trip),'license'),'Open attendance never bypasses expired Driver licensing');run($p,"UPDATE personnel SET license_expiry='2099-01-01' WHERE id=?",[$driver]);
 run($p,'UPDATE personnel SET active=0 WHERE id=?',[$helper]);turn_ok(DispatcherAttendance::blocker($p,$day,$helper,$trip)!==null,'Open attendance never bypasses inactive personnel');run($p,'UPDATE personnel SET active=1 WHERE id=?',[$helper]);
@@ -138,10 +138,10 @@ turn_ok((int)one($p,"SELECT COUNT(*) AS n FROM inspections WHERE trip_id=? AND k
 Attendance::action($night,'time_out',['personnel_id'=>$driver,'session_id'=>$sid,'request_key'=>turn_key()]);
 $session=one($p,'SELECT * FROM dispatcher_attendance_sessions WHERE id=?',[$sid]);turn_ok((int)$session['timed_in_by']===$day['id']&&(int)$session['timed_out_by']===$night['id'],'Incoming Time Out preserves original Time In and both actors');
 turn_ok(str_contains((string)DispatcherAttendance::blocker($p,$night,$driver),'Time In'),'Timed Out personnel cannot be assigned');
-$mechanic=Mechanics::action($admin,'save',['full_name'=>'Fixture Mechanic'])['id'];
+$mechanic=Mechanics::action($motor,'save',['full_name'=>'Fixture Mechanic'])['id']; // integrated: the Motorpool Custodian owns the mechanic masterlist
 $roster=Attendance::action($admin,'list',['kind'=>'Mechanic','duty_date'=>date('Y-m-d'),'duty_shift'=>'Day']);turn_ok(in_array($mechanic,array_map('intval',array_column($roster['rows'],'id')),true),'Mechanic attendance includes active staff without a permanent shift');
 Attendance::action($admin,'save',['kind'=>'Mechanic','duty_date'=>date('Y-m-d'),'duty_shift'=>'Day','items'=>array_map(fn($r)=>['id'=>$r['id'],'status'=>'Present'],$roster['rows'])]);
-turn_ok(one($p,'SELECT status FROM attendance_marks WHERE mechanic_id=?',[$mechanic])['status']==='Present','Admin mechanic attendance remains functional and auditable');
+turn_ok(one($p,'SELECT status FROM attendance_daily WHERE mechanic_id=?',[$mechanic])['status']==='Present','Admin mechanic attendance remains functional and auditable');
 // A second, isolated completed return exercises the existing NOT OK processing with a real fixture upload.
 $badTrip=insert($p,'trips',['trip_ref'=>'TURN-NOT-OK','intake_source'=>'Operations Head','created_by'=>$ops['id'],'client_id'=>$client,'truck_type'=>'Container','dispatcher_role'=>$day['role'],'dispatcher_shift'=>'Day','pickup_point'=>'Fixture origin','delivery_point'=>'Fixture destination','scheduled_at'=>date('Y-m-d H:i:s'),'status'=>'Completed','vehicle_id'=>$vid,'driver_id'=>$driver,'helper_id'=>$helper]);
 Trips::action($ops,'turnover_assign_initial',['trip_id'=>$badTrip,'dispatcher_id'=>$night['id']]);

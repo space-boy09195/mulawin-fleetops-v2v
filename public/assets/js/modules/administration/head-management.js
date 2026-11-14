@@ -299,6 +299,8 @@ App.page('head-approvals',{
   title:'Management Action Center',
   subtitle:'Management decisions and unresolved issues requiring attention.',
   render(ctx) {
+    if (UI.canGo('admin_approvals')) UI.tool(ctx,'Department Approvals',()=>App.go('admin_approvals'),'bi-check2-square');
+    if (UI.canGo('admin_overview')) UI.tool(ctx,'Department Oversight',()=>App.go('admin_overview'),'bi-grid-1x2');
     const d=ctx.data||{};
     const sections=[
       {key:'rates',label:'Route Rates',rows:d.route_rates||[],

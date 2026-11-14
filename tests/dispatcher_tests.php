@@ -21,7 +21,7 @@ $client=insert($p,'clients',['company_name'=>'ISOLATED DISPATCHER CLIENT','statu
 foreach (['Car Carrier','Container','Wing Van'] as $type) insert($p,'client_rates',['client_id'=>$client,'truck_type'=>$type,'rate_per_km'=>'50','minimum_charge'=>'0','updated_by'=>$ops['id']]);
 $base=['client_id'=>$client,'pickup_point'=>'FIXTURE ORIGIN','delivery_point'=>'FIXTURE DESTINATION','scheduled_at'=>date('Y-m-d\TH:i',time()+10800),'distance_km'=>'25'];
 $approved=[];foreach(TRUCK_TYPES as $type){$rid=insert($p,'client_routes',['route_ref'=>'DS-ROUTE-'.count($approved),'client_id'=>$client,'truck_type'=>$type,'origin_label'=>'FIXTURE ORIGIN','destination_label'=>'FIXTURE DESTINATION','origin_key'=>'fixture origin','destination_key'=>'fixture destination','distance_km'=>'25','status'=>'Approved','requested_by'=>$ops['id']]);insert($p,'client_route_rates',['route_id'=>$rid,'version_no'=>1,'rate_type'=>'Flat','rate_amount'=>'1250','status'=>'Approved','entered_by'=>$ops['id'],'effective_from'=>date('Y-m-d H:i:s')]);$approved[$type]=$rid;}
-$create=fn(string $type)=>Trips::action($ops,'create',$base+['truck_type'=>$type,'client_route_id'=>$approved[$type],'dispatcher_assignment'=>dispatcherRoleFor($type).':'.$shift['shift']])['trip_id'];
+$create=fn(string $type)=>Trips::action($ops,'create',$base+['truck_type'=>$type,'client_route_id'=>$approved[$type],'dispatcher_assignment'=>dispatcherRoleFor($type).':'.$shift['shift'],'responsible_dispatcher_id'=>$users[dispatcherRoleFor($type)]['id']])['trip_id']; // kenneth: explicit responsible account
 $ccId=$create('Car Carrier');$cwId=$create('Container');$wvId=$create('Wing Van');
 $activeIds=fn(array $u)=>array_map('intval',array_column(Trips::read($u,'trips',[])['active'],'id'));
 ds_check($activeIds($cc)===[$ccId],'Car Carrier assigned trips exclude the other team');
@@ -43,9 +43,9 @@ ds_check(count(array_filter($overview['active'],fn($t)=>(int)$t['id']===$wvId&&(
 ds_check(!in_array($ccId,array_map('intval',array_column($overview['active'],'id')),true),'Dashboard overview excludes other-team trips');
 
 core('CrewAttendance'); $shift=CrewAttendance::shiftFor();
-$driver=insert($p,'personnel',['full_name'=>'FIXTURE, DRIVER','person_type'=>'Driver','duty_shift'=>$shift['shift'],'license_expiry'=>'2030-01-01']);
+$driver=insert($p,'personnel',['full_name'=>'FIXTURE, DRIVER','person_type'=>'Driver','duty_shift'=>$shift['shift'],'license_number'=>'FX-DRV-1','license_expiry'=>'2030-01-01']); // kenneth: assignment needs license number + expiry
 $helper=insert($p,'personnel',['full_name'=>'FIXTURE, HELPER','person_type'=>'Helper','duty_shift'=>$shift['shift']]);
-$ccDriver=insert($p,'personnel',['full_name'=>'FIXTURE, CARRIER DRIVER','person_type'=>'Driver','duty_shift'=>$shift['shift'],'license_expiry'=>'2030-01-01']);
+$ccDriver=insert($p,'personnel',['full_name'=>'FIXTURE, CARRIER DRIVER','person_type'=>'Driver','duty_shift'=>$shift['shift'],'license_number'=>'FX-DRV-2','license_expiry'=>'2030-01-01']);
 $unmapped=insert($p,'personnel',['full_name'=>'FIXTURE, UNMAPPED','person_type'=>'Driver','duty_shift'=>$shift['shift']]);
 run($p,'UPDATE vehicles SET assigned_driver_id=?,assigned_helper_id=? WHERE id=?',[$driver,$helper,$cwTruck]);
 run($p,'UPDATE vehicles SET assigned_driver_id=? WHERE id=?',[$ccDriver,$ccTruck]);
@@ -54,7 +54,7 @@ $ccAvailability=Fleet::read($cc,'trucks',['view'=>'availability']); $cwAvailabil
 ds_check(count($ccAvailability['trucks'])===1&&$ccAvailability['trucks'][0]['truck_type']==='Car Carrier','Car Carrier availability is filtered on the server');
 ds_check(count($cwAvailability['trucks'])===2&&!in_array('Car Carrier',array_column($cwAvailability['trucks'],'truck_type'),true),'Container/Wing Van availability is filtered on the server');
 ds_check(array_column($ccAvailability['personnel'],'person_type')===['Driver'],'Car Carrier personnel view includes drivers, not helpers');
-ds_check(count($cwAvailability['personnel'])===2&&$cwAvailability['personnel'][0]['attendance_status']==='Present','Only regularly linked scoped personnel and actual current-shift attendance are readable');
+ds_check(count($cwAvailability['personnel'])===2&&$cwAvailability['personnel'][0]['attendance_status']===null,'Only regularly linked scoped personnel are readable; attendance comes from Time In sessions (a legacy Present mark is not attendance)');
 ds_check(!in_array($unmapped,array_map('intval',array_column($cwAvailability['personnel'],'id')),true)&&!in_array($unmapped,array_map('intval',array_column($ccAvailability['personnel'],'id')),true),'Unmapped personnel do not become a cross-team shared pool');
 insert($p,'trip_assignments',['resource_type'=>'person','resource_id'=>$driver,'trip_id'=>$ccId,'role'=>'driver']);
 $scopeRow=array_values(array_filter(Fleet::read($cw,'trucks',[])['personnel'],fn($r)=>(int)$r['id']===$driver))[0];
@@ -101,7 +101,7 @@ ds_check(one($p,'SELECT trip_id FROM trip_assignments WHERE resource_type=? AND 
 ds_denied(fn()=>Trips::action($cc,'dispatcher_resources',['trip_id'=>$assignId]),403,'Cross-team resource options are rejected');
 ds_denied(fn()=>Fleet::action($cw,'truck_details',['id'=>$ccTruck]),403,'Cross-group direct truck details are rejected');
 ds_denied(fn()=>Fleet::action($cw,'crew_details',['id'=>$ccDriver]),403,'Cross-group direct personnel details are rejected');
-$ccSecond=insert($p,'personnel',['full_name'=>'FIXTURE, CARRIER SECOND','person_type'=>'Driver','duty_shift'=>$shift['shift'],'license_expiry'=>'2030-01-01']);
+$ccSecond=insert($p,'personnel',['full_name'=>'FIXTURE, CARRIER SECOND','person_type'=>'Driver','duty_shift'=>$shift['shift'],'license_number'=>'FX-DRV-3','license_expiry'=>'2030-01-01']);
 insert($p,'vehicles',['plate_number'=>'DS-CC-2','truck_type'=>'Car Carrier','assigned_driver_id'=>$ccSecond]);
 Attendance::action($cc,'time_in',['personnel_id'=>$ccDriver,'request_key'=>$key(21)]);Attendance::action($cc,'time_in',['personnel_id'=>$ccSecond,'request_key'=>$key(22)]);
 $ccAssign=$create('Car Carrier');run($p,"UPDATE trips SET status='Awaiting Resources',approved_by=?,approved_at=NOW() WHERE id=?",[$ops['id'],$ccAssign]);
@@ -118,9 +118,9 @@ ds_check($transferred['session']===null&&!$transferred['can_record'],'Transferre
 ds_check(DispatcherAttendance::history($cw,['personnel_id'=>$ccSecond])['sessions']===[],'Attendance history remains group-scoped after a regular-link transfer');
 // The new Operations monitoring projection retains server-side pagination and search.
 for($i=0;$i<25;$i++){$pageId=$create('Container');run($p,'UPDATE trips SET pickup_point=? WHERE id=?',['PAGING FIXTURE '.$i,$pageId]);}
-$paging=Trips::read($ops,'dispatcher-monitoring',['search'=>'PAGING FIXTURE','page'=>1,'page_size'=>48]);
+$paging=Trips::read($ops,'dispatcher-monitoring',['search'=>'PAGING FIXTURE','trip_page'=>1,'page_size'=>48]); // kenneth: the page parameter is trip_page
 ds_check($paging['pageSize']===12&&$paging['total']===25&&count($paging['rows'])===12&&$paging['pages']===3,'Monitoring enforces twelve records despite supplied size parameters');
-$last=Trips::read($ops,'dispatcher-monitoring',['search'=>'PAGING FIXTURE','page'=>3]);ds_check(count($last['rows'])===1&&$last['page']===3,'Monitoring final page retains all matching records');
+$last=Trips::read($ops,'dispatcher-monitoring',['search'=>'PAGING FIXTURE','trip_page'=>3]);ds_check(count($last['rows'])===1&&$last['page']===3,'Monitoring final page retains all matching records');
 $search=Trips::read($ops,'dispatcher-monitoring',['search'=>'PAGING FIXTURE 24']);ds_check($search['total']===1,'Monitoring server search finds a record beyond the first page');
 test_drop($fresh);
 echo "RESULT: $passed passed, $failed failed\n";

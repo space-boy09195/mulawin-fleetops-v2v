@@ -193,8 +193,8 @@ final class HeadManagementNavigationTest extends TestCase {
         self::assertStringContainsString('this.bindDropdowns(root', $records);
         self::assertStringContainsString('data-executive-tab', $records);
         self::assertStringContainsString('this.keepExecutiveEmptyTable(root,id)', $records);
-        self::assertStringContainsString('RecordComponents.executiveTabs(box,financialTabs', $finance);
-        self::assertStringContainsString('RecordComponents.executiveTabs(box,billingTabs', $billing);
+        self::assertMatchesRegularExpression('/RecordComponents\.executiveTabs\(box,.*?financialTabs/', $finance);
+        self::assertMatchesRegularExpression('/RecordComponents\.executiveTabs\(box,.*?billingTabs/', $billing);
         self::assertStringContainsString('else UI.tabs(box,financialTabs', $finance);
         self::assertStringContainsString('else UI.tabs(box,billingTabs', $billing);
         self::assertStringNotContainsString('mountHeadWorkspace', $records);
@@ -208,7 +208,7 @@ final class HeadManagementNavigationTest extends TestCase {
         self::assertStringContainsString('data-head-trip-records', $js);
         self::assertStringContainsString('data-head-approvals-records', $js);
         self::assertStringContainsString('HeadRecords.render(root', $js);
-        self::assertStringContainsString('Approvals & Exception Records', $js);
+        self::assertStringContainsString('Management Action Records', $js);
         self::assertStringContainsString('RecordComponents.kpis(metrics)', $js);
         self::assertStringContainsString("label:'Route Rates'", $js);
         self::assertStringContainsString("label:'Fund Requests'", $js);
@@ -247,7 +247,7 @@ final class HeadManagementNavigationTest extends TestCase {
         self::assertStringContainsString("this.edit(ctx,'diesel')", $js);
         self::assertStringContainsString("this.edit(ctx,row.type)", $js);
         self::assertStringContainsString("App.api('Admin.pricing_save',reviewed)", $js);
-        self::assertStringContainsString("requireRole($u,'admin')", $settings);
+        self::assertStringContainsString("requireRole(\$u,'admin')", $settings);
         self::assertStringNotContainsString("Fuel Efficiency per Truck Type</h2>", $js);
         $css=file_get_contents($root.'/public/assets/css/records.css');
         self::assertIsString($css);
@@ -293,7 +293,7 @@ final class HeadManagementNavigationTest extends TestCase {
         self::assertStringContainsString("UI.printReport([sections[current]]", $reports);
         self::assertStringContainsString("UI.printReport(keys.map", $reports);
         self::assertStringContainsString("UI.tabs(box", $reports);
-        self::assertStringContainsString("self::reportInsights($sections)", $analytics);
+        self::assertStringContainsString("self::reportInsights(\$sections)", $analytics);
         self::assertStringContainsString(".head-report-category-tab.active", $styles);
     }
 
@@ -359,7 +359,7 @@ final class HeadManagementNavigationTest extends TestCase {
         self::assertStringContainsString('UI.chartHtml(', $dashboard);
         self::assertStringContainsString('.rpm-executive-dashboard .rpm-exec-charts', $css);
         self::assertStringContainsString("readSections([", $analytics);
-        self::assertStringContainsString("\'executive\' => \$executive", $analytics);
+        self::assertStringContainsString("'executive' => \$executive", $analytics);
         self::assertStringContainsString("pricing_settings_history", $analytics);
         self::assertStringContainsString(".rpm-executive-dashboard .rpm-exec-departments", $css);
     }

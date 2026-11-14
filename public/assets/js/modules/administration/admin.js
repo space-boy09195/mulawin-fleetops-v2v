@@ -73,10 +73,9 @@ const HeadAdminPage = {
         : { name: 'value', label: `Value (${s.unit}, ${s.min} to ${s.max})`, type: 'number', step: 'any', value: s.value, required: true, col: 12 };
       // CHECKLIST_42_ATTENDANCE_ENFORCEMENT_V1: show readiness before the Admin switches Warn / Enforce.
       const readinessHtml = (r) => {
-        const un = r.unassigned || [], tr = r.trips || [];
-        if (!un.length && !tr.length) return '<div class="alert alert-success py-2 small mb-0">Ready: every active driver and helper has a shift, and no upcoming trip has crew on another shift.</div>';
-        return `<div class="alert alert-warning py-2 small mb-0">${un.length ? `<b>${un.length} driver(s)/helper(s) have no shift</b> (Enforce is refused until they have one): ${un.slice(0, 15).map(x => UI.esc(x.full_name)).join(', ')}${un.length > 15 ? ', ...' : ''}.<br>` : ''}`
-          + `${tr.length ? `<b>${tr.length} upcoming trip(s)</b> would be blocked under Enforce:<ul class="mb-0">${tr.slice(0, 10).map(x => `<li>${UI.esc(x.trip_ref)} · ${UI.datetime(x.scheduled_at)}: ${x.issues.map(UI.esc).join('; ')}</li>`).join('')}</ul>` : ''}</div>`;
+        const tr = r.trips || [];
+        if (!tr.length) return '<div class="alert alert-success py-2 small mb-0">Ready: no upcoming trip has assigned crew marked Absent.</div>';
+        return `<div class="alert alert-warning py-2 small mb-0"><b>${tr.length} upcoming trip(s)</b> would be blocked under Enforce:<ul class="mb-0">${tr.slice(0, 10).map(x => `<li>${UI.esc(x.trip_ref)} · ${UI.datetime(x.scheduled_at)}: ${x.issues.map(UI.esc).join('; ')}</li>`).join('')}</ul></div>`;
       };
       const settingModal = async (s) => {
         const intro = s.format === 'attendance_mode' ? readinessHtml(await App.api('Attendance.readiness', {})) : undefined;
@@ -110,7 +109,8 @@ const HeadAdminPage = {
           +'<label class="record-workspace-sort-option"><input type="radio" name="'+sortId+'" value="desc" data-record-sort> Name Z–A</label></div></div>';
         const columns=[['Name','full_name'],['Username','username'],['Email','email'],
           ['Role','role',v=>UI.esc(d.roles[v]||v)],['Shift','shift'],
-          ['Status','active',v=>Number(v)?UI.badge('Active'):UI.badge('Inactive')],
+          ['Status','active',(v,u)=>(Number(v)?UI.badge('Active'):UI.badge('Inactive'))
+            +(Number(u.must_change_password)?'<div class="cell-sub">Must change password</div>':'')],
           ['E-signature','has_signature','yes'],['Last login','last_login_at','datetime']];
         const h=UI.table(columns,accounts,{
           title:'User Accounts',tools:toolbar,showAllColumns:true,viewSwitch:false,

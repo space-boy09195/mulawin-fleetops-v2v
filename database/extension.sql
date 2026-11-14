@@ -304,7 +304,7 @@ CREATE TABLE parts (
 
 -- =====================================================================
 -- MECHANIC MASTERLIST  (supports Corrective Maintenance only)
--- availability: Available | Assigned (has an active repair, set by the system) | Unavailable (manual, with reason)
+-- availability: Available (timed in) | Assigned (timed in, has an active repair) | Unavailable (not timed in). See mechanic_attendance.
 -- =====================================================================
 CREATE TABLE mechanics (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -313,7 +313,7 @@ CREATE TABLE mechanics (
   duty_shift VARCHAR(5) NULL COMMENT 'Day or Night; assigned by Admin',
   contact_number VARCHAR(40) NULL,
   specialization VARCHAR(150) NULL COMMENT 'e.g. engine, electrical, brakes, welding',
-  availability VARCHAR(15) NOT NULL DEFAULT 'Available',
+  availability VARCHAR(15) NOT NULL DEFAULT 'Unavailable',
   unavailable_reason VARCHAR(150) NULL,
   active TINYINT NOT NULL DEFAULT 1,
   notes VARCHAR(255) NULL,
@@ -935,6 +935,118 @@ CREATE TABLE attendance_marks (
   CONSTRAINT chk_att_status CHECK (status IN ('Present','Absent'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- MECHANIC_ATTENDANCE_V1: Time In / Time Out sessions of mechanics (Maintenance). History is never overwritten.
+CREATE TABLE mechanic_attendance (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  mechanic_id INT NOT NULL,
+  time_in DATETIME NOT NULL,
+  time_out DATETIME NULL,
+  time_in_by INT NOT NULL,
+  time_out_by INT NULL,
+  open_mechanic INT AS (CASE WHEN time_out IS NULL THEN mechanic_id ELSE NULL END) STORED COMMENT 'one open Time In per mechanic (database rule)',
+  UNIQUE KEY uq_mattn_one_open (open_mechanic),
+  INDEX idx_mattn_mechanic (mechanic_id, time_in),
+  CONSTRAINT fk_mattn_mechanic FOREIGN KEY (mechanic_id) REFERENCES mechanics(id),
+  CONSTRAINT fk_mattn_in_by FOREIGN KEY (time_in_by) REFERENCES users(id),
+  CONSTRAINT fk_mattn_out_by FOREIGN KEY (time_out_by) REFERENCES users(id),
+  CONSTRAINT chk_mattn_order CHECK (time_out IS NULL OR time_out >= time_in)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Originals of mechanics set Unavailable by migration 2026-11-10_10 (empty on a fresh install; kept so the schema is identical to an upgraded database).
+CREATE TABLE mechanic_availability_backup (
+  mechanic_id INT NOT NULL PRIMARY KEY,
+  original_availability VARCHAR(15) NOT NULL,
+  original_unavailable_reason VARCHAR(150) NULL,
+  backed_up_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_mavb_mechanic FOREIGN KEY (mechanic_id) REFERENCES mechanics(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='originals of mechanics set Unavailable by migration 2026-11-10_10; used by its rollback';
+
+-- DAILY_ATTENDANCE_V1: one Operations Attendance mark per driver/helper/mechanic per date (no permanent shifts).
+-- attendance_marks above is kept as the legacy shift-based archive (never written by the application any more).
+CREATE TABLE attendance_daily (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  duty_date DATE NOT NULL,
+  personnel_id INT NULL,
+  mechanic_id INT NULL,
+  status VARCHAR(7) NOT NULL,
+  marked_by INT NOT NULL,
+  marked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  legacy_shifts VARCHAR(9) NULL COMMENT 'Day, Night or Day+Night when copied from attendance_marks; NULL for marks made after the migration',
+  UNIQUE KEY uq_attd_person (duty_date,personnel_id),
+  UNIQUE KEY uq_attd_mech (duty_date,mechanic_id),
+  INDEX idx_attd_date (duty_date),
+  CONSTRAINT fk_attd_person FOREIGN KEY (personnel_id) REFERENCES personnel(id),
+  CONSTRAINT fk_attd_mech FOREIGN KEY (mechanic_id) REFERENCES mechanics(id),
+  CONSTRAINT fk_attd_user FOREIGN KEY (marked_by) REFERENCES users(id),
+  CONSTRAINT chk_attd_kind CHECK ((personnel_id IS NOT NULL AND mechanic_id IS NULL) OR (personnel_id IS NULL AND mechanic_id IS NOT NULL)),
+  CONSTRAINT chk_attd_status CHECK (status IN ('Present','Absent'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migrations 2026-11-10_10 and 2026-11-10_11: their tables are created ABOVE, so a fresh install is already complete.
+-- Recorded here, AFTER the tables, so a failure while creating them can never leave a false migration record.
+INSERT INTO schema_migrations (id) VALUES ('2026-11-10_10_mechanic_attendance'), ('2026-11-10_11_daily_attendance');
+
+-- Migration 2026-11-12_12 (JOB_HELPER_MECHANICS_V1): assisting mechanics of a repair job. maintenance_jobs.mechanic_id stays the lead.
+CREATE TABLE maintenance_job_helpers (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  maintenance_job_id INT NOT NULL,
+  mechanic_id INT NOT NULL,
+  assigned_at DATETIME NOT NULL,
+  assigned_by INT NOT NULL,
+  released_at DATETIME NULL,
+  released_by INT NULL,
+  release_reason VARCHAR(255) NULL,
+  active_mechanic INT AS (CASE WHEN released_at IS NULL THEN mechanic_id ELSE NULL END) STORED COMMENT 'one active assisting assignment per mechanic',
+  UNIQUE KEY uq_mjh_one_active (active_mechanic),
+  INDEX idx_mjh_job (maintenance_job_id, released_at),
+  INDEX idx_mjh_mechanic (mechanic_id, assigned_at),
+  CONSTRAINT fk_mjh_job FOREIGN KEY (maintenance_job_id) REFERENCES maintenance_jobs(id),
+  CONSTRAINT fk_mjh_mechanic FOREIGN KEY (mechanic_id) REFERENCES mechanics(id),
+  CONSTRAINT fk_mjh_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id),
+  CONSTRAINT fk_mjh_released_by FOREIGN KEY (released_by) REFERENCES users(id),
+  CONSTRAINT chk_mjh_release CHECK (released_at IS NULL OR (released_at >= assigned_at AND released_by IS NOT NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT INTO schema_migrations (id) VALUES ('2026-11-12_12_job_helper_mechanics');
+
+-- Migration 2026-11-12_13 (STOCK_COUNT_RECONCILIATION_V1): physical stock counts reviewed by Admin before posting. See the migration file.
+CREATE TABLE stock_counts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  count_ref VARCHAR(30) NOT NULL UNIQUE COMMENT 'SC-YYYY-NNNN, given by the system',
+  part_id INT NOT NULL,
+  system_qty INT NOT NULL COMMENT 'quantity on hand recorded by the system when the count was entered',
+  counted_qty INT NOT NULL COMMENT 'quantity physically counted',
+  variance INT AS (counted_qty - system_qty) STORED,
+  reason VARCHAR(255) NOT NULL,
+  status VARCHAR(12) NOT NULL DEFAULT 'Submitted',
+  counted_by INT NOT NULL,
+  counted_at DATETIME NOT NULL,
+  reviewed_by INT NULL,
+  reviewed_at DATETIME NULL,
+  review_notes VARCHAR(255) NULL,
+  qty_before INT NULL COMMENT 'on hand just before posting',
+  qty_after INT NULL COMMENT 'on hand just after posting',
+  stock_movement_id INT NULL,
+  open_part INT AS (CASE WHEN status = 'Submitted' THEN part_id ELSE NULL END) STORED COMMENT 'one open count per part',
+  UNIQUE KEY uq_sc_one_open (open_part),
+  UNIQUE KEY uq_sc_movement (stock_movement_id),
+  INDEX idx_sc_part (part_id, counted_at),
+  INDEX idx_sc_status (status, counted_at),
+  CONSTRAINT fk_sc_part FOREIGN KEY (part_id) REFERENCES parts(id),
+  CONSTRAINT fk_sc_counted_by FOREIGN KEY (counted_by) REFERENCES users(id),
+  CONSTRAINT fk_sc_reviewed_by FOREIGN KEY (reviewed_by) REFERENCES users(id),
+  CONSTRAINT fk_sc_movement FOREIGN KEY (stock_movement_id) REFERENCES stock_movements(id),
+  CONSTRAINT chk_sc_status CHECK (status IN ('Submitted', 'Posted', 'Rejected')),
+  CONSTRAINT chk_sc_qty CHECK (system_qty >= 0 AND counted_qty >= 0 AND counted_qty <> system_qty),
+  CONSTRAINT chk_sc_reviewer CHECK (reviewed_by IS NULL OR reviewed_by <> counted_by),
+  CONSTRAINT chk_sc_review CHECK (
+    (status = 'Submitted' AND reviewed_by IS NULL AND reviewed_at IS NULL AND stock_movement_id IS NULL)
+    OR (status = 'Rejected' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND stock_movement_id IS NULL)
+    OR (status = 'Posted' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND stock_movement_id IS NOT NULL
+        AND qty_before IS NOT NULL AND qty_after = counted_qty))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO schema_migrations (id) VALUES ('2026-11-12_13_stock_count_reconciliation');
+
 
 -- Additive Dispatcher attendance sessions. Existing attendance_marks and operational rows are untouched.
 CREATE TABLE IF NOT EXISTS dispatcher_attendance_sessions (
@@ -1067,3 +1179,21 @@ CREATE TABLE IF NOT EXISTS billing_pricing (
  CHECK(JSON_VALID(snapshot_json))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO schema_migrations(id) VALUES('2026-11-13_13_fixed_route_fuel');
+
+-- 2026-11-14_14_incident_clearance: Motorpool vehicle clearance (Fit / Not Fit to Continue) and Dispatcher resumption on incidents.
+ALTER TABLE incidents
+  ADD COLUMN clearance VARCHAR(20) NULL COMMENT 'Motorpool decision: Fit to Continue or Not Fit to Continue' AFTER recommendation,
+  ADD COLUMN clearance_findings VARCHAR(1000) NULL COMMENT 'Motorpool findings behind the clearance decision' AFTER clearance,
+  ADD COLUMN cleared_by INT NULL AFTER clearance_findings,
+  ADD COLUMN cleared_at DATETIME NULL AFTER cleared_by,
+  ADD COLUMN resumed_by INT NULL COMMENT 'Dispatcher who resumed the trip on a Fit to Continue clearance' AFTER resolved_at,
+  ADD COLUMN resumed_at DATETIME NULL AFTER resumed_by,
+  ADD CONSTRAINT fk_incident_cleared_by FOREIGN KEY (cleared_by) REFERENCES users(id),
+  ADD CONSTRAINT fk_incident_resumed_by FOREIGN KEY (resumed_by) REFERENCES users(id),
+  ADD CONSTRAINT chk_incident_clearance CHECK (clearance IS NULL OR clearance IN ('Fit to Continue','Not Fit to Continue')),
+  ADD CONSTRAINT chk_incident_clearance_record CHECK ((clearance IS NULL AND cleared_by IS NULL AND cleared_at IS NULL AND clearance_findings IS NULL)
+      OR (clearance IS NOT NULL AND cleared_by IS NOT NULL AND cleared_at IS NOT NULL AND clearance_findings IS NOT NULL)),
+  ADD CONSTRAINT chk_incident_resume_record CHECK ((resumed_by IS NULL AND resumed_at IS NULL)
+      OR (resumed_by IS NOT NULL AND resumed_at IS NOT NULL AND clearance = 'Fit to Continue'));
+
+INSERT INTO schema_migrations (id) VALUES ('2026-11-14_14_incident_clearance');

@@ -30,6 +30,22 @@ final class Billing {
 
     public static function read(array $u, string $page, array $q): array {
         $p = db();
+        // BILLING_WORKSPACE_V1: Overview / Collections / Receivables pages read only what they show.
+        if ($page === 'billing_overview') return self::overview($u, $p);
+        if ($page === 'billing_collections' || $page === 'billing_receivables') {
+            $data = readSections([
+                'collections' => fn() => $page === 'billing_collections' ? many($p, "SELECT co.*, b.invoice_number, b.id AS billing_id, b.total_amount, b.amount_paid, c.company_name AS client, u.full_name AS recorded_by_name FROM collections co
+                    JOIN billings b ON b.id=co.billing_id JOIN clients c ON c.id=b.client_id JOIN users u ON u.id=co.recorded_by ORDER BY co.payment_date DESC, co.id DESC LIMIT 1000") : [],
+                'open' => fn() => many($p, "SELECT b.id, b.invoice_number, b.invoice_date, b.due_date, b.total_amount, b.amount_paid, b.status, (b.total_amount-b.amount_paid) AS balance,
+                        DATEDIFF(CURRENT_DATE(), b.due_date) AS days_overdue, c.id AS client_id, c.company_name AS client, t.trip_ref,
+                        (SELECT MAX(co.payment_date) FROM collections co WHERE co.billing_id=b.id) AS last_payment
+                    FROM billings b JOIN clients c ON c.id=b.client_id JOIN trips t ON t.id=b.trip_id WHERE b.status IN ('Invoiced','Partially Paid') ORDER BY b.due_date, b.id"),
+                'receivables' => fn() => $page === 'billing_receivables' ? self::aging($p) : [],
+            ]);
+            $data['methods'] = Money::METHODS; $data['asOf'] = date('Y-m-d');
+            $data['can'] = ['act' => hasRole($u, 'billing'), 'decide' => hasRole($u, 'admin'), 'me' => (int)$u['id']];
+            return $data;
+        }
         $data = readSections([
             'billings' => fn() => many($p, "SELECT b.*, t.trip_ref, t.status AS trip_status, t.truck_type, t.pickup_point, t.delivery_point, t.dispatched_at, t.completed_at,
                     t.waybill_number, t.units_delivered, c.company_name AS client, c.payment_terms_days, v.plate_number,
@@ -42,13 +58,8 @@ final class Billing {
                 ORDER BY b.id DESC LIMIT 2000"),
             'collections' => fn() => many($p, "SELECT co.*, b.invoice_number, c.company_name AS client, u.full_name AS recorded_by_name FROM collections co
                 JOIN billings b ON b.id=co.billing_id JOIN clients c ON c.id=b.client_id JOIN users u ON u.id=co.recorded_by ORDER BY co.id DESC LIMIT 1000"),
-            'receivables' => fn() => many($p, "SELECT c.id, c.company_name AS client, COUNT(*) AS invoices, SUM(b.total_amount-b.amount_paid) AS balance,
-                    SUM(CASE WHEN b.due_date>=CURRENT_DATE() THEN b.total_amount-b.amount_paid ELSE 0 END) AS not_due,
-                    SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), b.due_date) BETWEEN 1 AND 30 THEN b.total_amount-b.amount_paid ELSE 0 END) AS d1_30,
-                    SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), b.due_date) BETWEEN 31 AND 60 THEN b.total_amount-b.amount_paid ELSE 0 END) AS d31_60,
-                    SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), b.due_date) > 60 THEN b.total_amount-b.amount_paid ELSE 0 END) AS d60
-                FROM billings b JOIN clients c ON c.id=b.client_id WHERE b.status IN ('Invoiced','Partially Paid') GROUP BY c.id, c.company_name ORDER BY balance DESC"),
-            'pendingRates' => fn() => 0,
+            'receivables' => fn() => self::aging($p),
+            'pendingRates' => fn() => 0, // Kenneth 16dce05: client rates are Admin-approved; Billing is not prompted to set them.
             'adjustments' => fn() => many($p, "SELECT c.id, c.billing_id, c.kind, c.request_type, c.description, c.amount, c.reason, c.added_by, c.created_at,
                     o.description AS old_description, o.amount AS old_amount, u.full_name AS added_by_name, t.trip_ref, cl.company_name AS client, b.total_amount
                 FROM billing_charges c JOIN billings b ON b.id=c.billing_id JOIN trips t ON t.id=b.trip_id JOIN clients cl ON cl.id=b.client_id
@@ -57,6 +68,49 @@ final class Billing {
         ]);
         $data['methods'] = Money::METHODS;
         $data['vatRate'] = Settings::value('vat_rate');
+        $data['can'] = ['act' => hasRole($u, 'billing'), 'decide' => hasRole($u, 'admin'), 'me' => (int)$u['id']];
+        return $data;
+    }
+
+    /** Receivables aging per client, as of today: open invoices (Invoiced / Partially Paid) by days past the due date. */
+    private static function aging(PDO $p): array {
+        return many($p, "SELECT c.id, c.company_name AS client, COUNT(*) AS invoices, SUM(b.total_amount-b.amount_paid) AS balance,
+                SUM(CASE WHEN b.due_date>=CURRENT_DATE() THEN b.total_amount-b.amount_paid ELSE 0 END) AS not_due,
+                SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), b.due_date) BETWEEN 1 AND 30 THEN b.total_amount-b.amount_paid ELSE 0 END) AS d1_30,
+                SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), b.due_date) BETWEEN 31 AND 60 THEN b.total_amount-b.amount_paid ELSE 0 END) AS d31_60,
+                SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), b.due_date) > 60 THEN b.total_amount-b.amount_paid ELSE 0 END) AS d60,
+                MAX(DATEDIFF(CURRENT_DATE(), b.due_date)) AS max_days_overdue
+            FROM billings b JOIN clients c ON c.id=b.client_id WHERE b.status IN ('Invoiced','Partially Paid') GROUP BY c.id, c.company_name ORDER BY balance DESC");
+    }
+
+    /**
+     * BILLING_WORKSPACE_V1 — Billing Overview (read only). Counts and short lists over stored billings / collections.
+     * The pending-adjustment count needs migration 09 (billing_charges.status); without it only that section is unavailable.
+     */
+    private static function overview(array $u, PDO $p): array {
+        $month = date('Y-m-01');
+        $data = readSections([
+            'counts' => fn() => one($p, "SELECT COALESCE(SUM(status='Ongoing'),0) AS ongoing, COALESCE(SUM(status='For Billing'),0) AS for_billing,
+                    COALESCE(SUM(status IN ('Invoiced','Partially Paid')),0) AS unpaid, COALESCE(SUM(CASE WHEN status IN ('Invoiced','Partially Paid') THEN total_amount-amount_paid END),0) AS outstanding,
+                    COALESCE(SUM(CASE WHEN status IN ('Invoiced','Partially Paid') AND due_date < CURRENT_DATE() THEN total_amount-amount_paid END),0) AS overdue,
+                    COALESCE(SUM(status IN ('Invoiced','Partially Paid') AND due_date < CURRENT_DATE()),0) AS overdue_n,
+                    COALESCE(SUM(CASE WHEN invoice_date >= ? THEN total_amount END),0) AS billed_month
+                FROM billings", [$month]),
+            'collectedMonth' => fn() => one($p, 'SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS total FROM collections WHERE payment_date >= ?', [$month]),
+            'pendingAdjustments' => fn() => (int)one($p, "SELECT COUNT(*) AS n FROM billing_charges WHERE status='Pending Approval'")['n'],
+            'pendingRates' => fn() => 0, // same Admin-only rate policy as read().
+            'forBilling' => fn() => many($p, "SELECT b.id, t.trip_ref, t.completed_at, c.company_name AS client, b.total_amount, b.docs_verified_at,
+                    ((SELECT COUNT(*) FROM documents d WHERE d.entity_type='trip' AND d.entity_id=t.id AND d.category='Waybill') > 0
+                     AND (SELECT COUNT(*) FROM documents d WHERE d.entity_type='trip' AND d.entity_id=t.id AND d.category='Delivery Receipt') > 0
+                     AND (SELECT COUNT(*) FROM documents d WHERE d.entity_type='trip' AND d.entity_id=t.id AND d.category='Acknowledgement Receipt') > 0) AS docs_complete
+                FROM billings b JOIN trips t ON t.id=b.trip_id JOIN clients c ON c.id=b.client_id WHERE b.status='For Billing' ORDER BY t.completed_at LIMIT 25"),
+            'overdue' => fn() => many($p, "SELECT b.id, b.invoice_number, b.due_date, (b.total_amount-b.amount_paid) AS balance, DATEDIFF(CURRENT_DATE(), b.due_date) AS days_overdue, c.company_name AS client
+                FROM billings b JOIN clients c ON c.id=b.client_id WHERE b.status IN ('Invoiced','Partially Paid') AND b.due_date < CURRENT_DATE() ORDER BY b.due_date LIMIT 25"),
+            'recentCollections' => fn() => many($p, "SELECT co.id, co.amount, co.payment_date, co.payment_method, b.id AS billing_id, b.invoice_number, c.company_name AS client FROM collections co
+                JOIN billings b ON b.id=co.billing_id JOIN clients c ON c.id=b.client_id ORDER BY co.payment_date DESC, co.id DESC LIMIT 15"),
+            'aging' => fn() => self::aging($p),
+        ]);
+        $data['asOf'] = date('Y-m-d'); $data['methods'] = Money::METHODS;   // methods: the shared billing drawer records collections
         $data['can'] = ['act' => hasRole($u, 'billing'), 'decide' => hasRole($u, 'admin'), 'me' => (int)$u['id']];
         return $data;
     }

@@ -27,13 +27,21 @@ try {
     }
     $buyer=$users['purchasing']; $pool=$users['motorpool']; $fin=$users['finance'];
     $truck=insert($p,'vehicles',['plate_number'=>'INV-001','truck_type'=>'Wing Van']);
-    $part=['part_number'=>'INV-TIRE','description'=>'Test tire','unit'=>'piece','unit_cost'=>'100','reorder_level'=>2,'opening_qty'=>5];
+    // Integrated stock control (luis-maintenance-ui): a new part starts at 0; stock enters only through PO receiving or an Admin-reviewed count.
+    $part=['part_number'=>'INV-TIRE','description'=>'Test tire','unit'=>'piece','unit_cost'=>'100','reorder_level'=>2];
     Purchasing::action($buyer,'part_save',$part);
     $pid=(int)one($p,'SELECT id FROM parts WHERE part_number=?',['INV-TIRE'])['id'];
     $stock=fn()=>(int)one($p,'SELECT quantity_on_hand FROM parts WHERE id=?',[$pid])['quantity_on_hand'];
-    verify($stock()===5,'Opening stock recorded');
+    verify($stock()===0,'New part starts with 0 on hand');
+    Finance::action($fin,'budget_set',['amount'=>'1000','period_start'=>date('Y-m-d'),'period_end'=>date('Y-m-d',time()+86400)]);
+    Purchasing::action($buyer,'po_create',['supplier_name'=>'Test supplier','supplier_address'=>'Test address','purpose'=>'Opening tire stock','lines'=>[['part_id'=>$pid,'quantity'=>5,'unit_price'=>100]]]);
+    $po=(int)one($p,'SELECT MAX(id) AS id FROM purchase_orders')['id'];
+    Purchasing::action($fin,'po_decide',['po_id'=>$po,'decision'=>'approve']);
+    $pol=(int)one($p,'SELECT id FROM purchase_order_lines WHERE purchase_order_id=?',[$po])['id'];
+    Purchasing::action($buyer,'po_receive',['po_id'=>$po,'receive'=>[['line_id'=>$pol,'qty'=>5]],'supplier_invoice_no'=>'SI-INV-1']);
+    verify($stock()===5,'Stock received on an approved PO');
     refused(fn()=>Purchasing::action($buyer,'part_save',$part),409,'Duplicate part number rejected');
-    refused(fn()=>Purchasing::action($buyer,'adjust',['part_id'=>$pid,'quantity_delta'=>-6,'reason'=>'Test']),409,'Insufficient stock adjustment rejected');
+    refused(fn()=>Purchasing::action($buyer,'adjust',['part_id'=>$pid,'quantity_delta'=>-6,'reason'=>'Test']),403,'Manual stock adjustment rejected (stock count review only)');
     verify($stock()===5,'Rejected adjustment leaves stock unchanged');
     $request=['vehicle_id'=>$truck,'purpose'=>'Replace damaged tire','lines'=>[['part_id'=>$pid,'quantity'=>3]]];
     Purchasing::action($pool,'request_create',$request);

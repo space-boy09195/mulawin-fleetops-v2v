@@ -89,15 +89,15 @@
     const incidentStatus = mount.querySelector('#incidentStatus'); incidentStatus.value = 'open'; incidentStatus.dispatchEvent(new Event('change'));
     assert(mount.querySelector('[data-incident-table]').textContent.includes('INC-1') && !mount.querySelector('[data-incident-table]').textContent.includes('INC-2'), 'Incidents filter excludes resolved records');
     const app = document.createElement('div'); app.id = 'app'; document.body.append(app);
-    App.me.user.full_name = 'Fixture User'; App.me.user.username = 'fixture'; App.me.notifications = []; App.me.unread = 0;
-    const nav = ['dashboard', 'trips', 'funds', 'trucks', 'crew', 'clients', 'routes', 'documents', 'reports'].map(id => ({id, label:id, icon:'bi-grid'}));
+    App.me.user.role = 'operations_head'; App.me.user.full_name = 'Fixture User'; App.me.user.username = 'fixture'; App.me.notifications = []; App.me.unread = 0;
+    const nav = ['dashboard', 'trips', 'dispatcher-monitoring', 'funds', 'trucks', 'crew', 'routes', 'mechanics', 'maintenance', 'documents', 'reports'].map(id => ({id, label:id, icon:'bi-grid'}));
     App.me.nav = nav; App.shell();
-    assert(app.querySelectorAll('[data-trip-section]').length === 4, 'Operations Head sidebar has four trip workflow links');
+    assert(app.querySelectorAll('.ops-head-nav-group').length === 4 && app.querySelector('[data-nav=trips]'), 'Operations Head keeps the approved four collapsible navigation groups');
     assert(!!app.querySelector('a[href="#routes"]'), 'Operations Head keeps Client Routes');
     App.me.user.role = 'container_wingvan_dispatcher'; App.me.nav = nav.filter(n => !['routes', 'reports'].includes(n.id)); App.shell();
     assert(app.querySelectorAll('[data-trip-section]').length === 4, 'Dispatcher sidebar has four trip workflow links');
     assert(!app.querySelector('a[href="#routes"]') && app.textContent.includes('My Trip Funds'), 'Dispatcher sidebar preserves permissions and personal fund label');
     output.textContent = checks.join('\n') + '\nRESULT: ' + checks.length + ' passed, 0 failed';
-  } catch (e) { output.textContent = checks.join('\n') + '\nFAIL ' + e.stack; }
+  } catch (e) { output.textContent = checks.join('\n') + '\nFAIL ' + e.stack + '\nRESULT: '+checks.length+' passed, 1 failed'; }
 })();
 </script>

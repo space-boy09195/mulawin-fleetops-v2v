@@ -22,7 +22,10 @@ core('Notify');
 
 final class Analytics {
     public static function read(array $u, string $page, array $q): array {
-        return $page === 'dashboard' ? self::dashboard($u) : self::reports($u, $q);
+        // PURCHASING_ANALYTICS_V1: 'purchasing_reports' is served by the Purchasing analytics (inventory, purchasing, recommendations).
+        if ($page === 'purchasing_reports') { Actions::load('Purchasing'); return Purchasing::analytics($u, $q); }
+        if ($page === 'maintenance_reports') return self::maintenanceReport($u, $q);
+        return $page === 'dashboard' ? self::dashboard($u) : self::reports($u, $q, $page === 'purchasing_reports');
     }
     public static function action(array $u, string $action, array $d): array {
         if(in_array($action,['operations_export','operations_incident'],true)){
@@ -116,7 +119,7 @@ final class Analytics {
             'columns' => [['Record', 'job_ref'], ['Truck', 'plate_number'], ['Problem', 'problem'], ['Mechanic', 'mechanic'], ['Status', 'status', 'badge'], ['Expected back', 'expected_completion', 'date']],
             'rows' => many($p, "SELECT m.job_ref, v.plate_number, m.problem, mc.full_name AS mechanic, IF(m.status='Completed','Awaiting verification', m.status) AS status, m.expected_completion
                 FROM maintenance_jobs m JOIN vehicles v ON v.id=m.vehicle_id LEFT JOIN mechanics mc ON mc.id=m.mechanic_id WHERE m.open_key=1
-                ORDER BY FIELD(m.priority,'Critical','High','Normal','Low'), m.id LIMIT 10"), 'empty' => 'No truck is under repair.'];
+                ORDER BY FIELD(m.status,'Reported','Under Inspection','Under Repair','Completed'), m.reported_on, m.id LIMIT 10"), 'empty' => 'No truck is under repair.'];
         $doneTable = fn() => ['title' => 'Recently completed repairs', 'page' => 'maintenance',
             'columns' => [['Record', 'job_ref'], ['Truck', 'plate_number'], ['Corrective action', 'repair_performed'], ['Mechanic', 'mechanic'], ['Returned to service', 'verified_at', 'datetime']],
             'rows' => many($p, "SELECT m.job_ref, v.plate_number, m.repair_performed, mc.full_name AS mechanic, m.verified_at FROM maintenance_jobs m JOIN vehicles v ON v.id=m.vehicle_id
@@ -130,7 +133,7 @@ final class Analytics {
             $alert(self::n($p, "SELECT COUNT(*) AS n FROM trips WHERE status='On Hold - Incident Reported'"), 'trip(s) on hold because of an incident', 'trips', 'danger');
             $alert(self::n($p, "SELECT COUNT(*) AS n FROM trips WHERE status IN ('Pre-Assigned','Ready for Dispatch') AND scheduled_at < NOW()"), 'trip(s) past the schedule and not yet dispatched (delayed)', 'trips', 'danger');
             if ($r === 'admin') {
-                $alert(self::n($p, "SELECT COUNT(*) AS n FROM purchase_orders WHERE status='Pending Approval' AND approver_role='admin'"), 'purchase order(s) above the limit waiting for your approval', 'purchasing');
+                $alert(self::n($p, "SELECT COUNT(*) AS n FROM purchase_orders WHERE status='Pending Approval' AND approver_role='admin'"), 'purchase order(s) above the limit waiting for your approval', 'purchase_orders');
                 if (empty(one($p, 'SELECT recovery_hash FROM users WHERE id=?', [$u['id']])['recovery_hash'])) $alerts[] = ['text' => 'No Admin recovery code yet. Make one from your name menu > Recovery code.', 'level' => 'info'];
             }
             $docDays = (int)Settings::value('document_alert_days');
@@ -167,16 +170,17 @@ final class Analytics {
             $tables[] = $doneTable();
         } elseif ($r === 'purchasing') {
             $inv = one($p, 'SELECT COUNT(*) AS parts, COALESCE(SUM(quantity_on_hand*unit_cost),0) AS value, SUM(reorder_level>0 AND quantity_on_hand<=reorder_level) AS low FROM parts WHERE active=1');
-            $cards = [['label' => 'Parts in inventory', 'value' => (int)$inv['parts'], 'icon' => 'bi-box-seam', 'page' => 'purchasing'],
-                      ['label' => 'Inventory value', 'value' => (float)$inv['value'], 'format' => 'money', 'icon' => 'bi-cash', 'page' => 'purchasing'],
-                      ['label' => 'Low-stock items', 'value' => (int)$inv['low'], 'icon' => 'bi-exclamation-triangle', 'color' => (int)$inv['low'] ? 'red' : 'green', 'page' => 'purchasing']];
-            $alert(self::n($p, "SELECT COUNT(*) AS n FROM part_requests WHERE status='Requested'"), 'parts request(s) to check and release', 'purchasing');
-            $alert(self::n($p, "SELECT COUNT(*) AS n FROM purchase_orders WHERE status IN ('Approved','Partially Received')"), 'approved purchase order(s) waiting for delivery', 'purchasing', 'info');
-            $alert((float)$inv['low'], 'low-stock item(s)', 'purchasing', 'danger');
-            $tables[] = ['title' => 'Low-stock items', 'page' => 'purchasing', 'columns' => [['Part', 'part_number'], ['Description', 'description'], ['On hand', 'quantity_on_hand'], ['Reorder level', 'reorder_level']],
+            $cards = [['label' => 'Parts in inventory', 'value' => (int)$inv['parts'], 'icon' => 'bi-box-seam', 'page' => 'inventory'],
+                      ['label' => 'Inventory value', 'value' => (float)$inv['value'], 'format' => 'money', 'icon' => 'bi-cash', 'page' => 'inventory'],
+                      ['label' => 'Low-stock items', 'value' => (int)$inv['low'], 'icon' => 'bi-exclamation-triangle', 'color' => (int)$inv['low'] ? 'red' : 'green', 'page' => 'inventory']];
+            $alert(self::n($p, "SELECT COUNT(*) AS n FROM part_requests WHERE status='Requested'"), 'parts request(s) to check and release', 'parts_requests');
+            $alert(self::n($p, "SELECT COUNT(*) AS n FROM purchase_orders WHERE status IN ('Approved','Partially Received')"), 'approved purchase order(s) waiting for delivery', 'purchase_orders', 'info');
+            $alert((float)$inv['low'], 'low-stock item(s)', 'inventory', 'danger');
+            $tables[] = ['title' => 'Low-stock items', 'page' => 'inventory', 'columns' => [['Part', 'part_number'], ['Description', 'description'], ['On hand', 'quantity_on_hand'], ['Reorder level', 'reorder_level']],
                          'rows' => many($p, 'SELECT part_number, description, quantity_on_hand, reorder_level FROM parts WHERE active=1 AND reorder_level>0 AND quantity_on_hand<=reorder_level ORDER BY quantity_on_hand'), 'empty' => 'No low-stock items.'];
         } elseif ($r === 'finance') {
-            $b = one($p, "SELECT amount-reserved_amount-spent_amount AS available, reserved_amount FROM budgets WHERE status='Active' AND category='Purchasing' ORDER BY id DESC LIMIT 1");
+            // ACCOUNTING_INTEGRITY_G7: same date rule as PO approval (Purchasing::poDecide); an expired budget is not "available".
+            $b = one($p, "SELECT amount-reserved_amount-spent_amount AS available, reserved_amount FROM budgets WHERE status='Active' AND category='Purchasing' AND CURRENT_DATE() BETWEEN period_start AND period_end ORDER BY id DESC LIMIT 1");
             $cards = [
                 ['label' => 'Funds ready for release', 'value' => self::n($p, "SELECT COALESCE(SUM(amount),0) AS n FROM fund_requests WHERE status='Ready for Release'"), 'format' => 'money', 'icon' => 'bi-cash-coin', 'page' => 'funds'],
                 ['label' => 'PO payables (received, unpaid)', 'value' => self::n($p, "SELECT COALESCE(SUM((SELECT COALESCE(SUM(l.received_qty*l.unit_price),0) FROM purchase_order_lines l WHERE l.purchase_order_id=o.id) - o.paid_amount),0) AS n FROM purchase_orders o WHERE o.payment_status IN ('Pending Payment','Partially Paid')"), 'format' => 'money', 'icon' => 'bi-receipt', 'page' => 'finance'],
@@ -184,9 +188,9 @@ final class Analytics {
                 ['label' => 'Expenses this month', 'value' => self::n($p, "SELECT COALESCE(SUM(amount),0) AS n FROM expenses WHERE incurred_on>=DATE_FORMAT(CURRENT_DATE(),'%Y-%m-01')"), 'format' => 'money', 'icon' => 'bi-wallet2', 'page' => 'finance'],
             ];
             $alert(self::n($p, "SELECT COUNT(*) AS n FROM fund_requests WHERE status='Ready for Release'"), 'approved trip fund(s) to release', 'funds');
-            $alert(self::n($p, "SELECT COUNT(*) AS n FROM purchase_orders WHERE status='Pending Approval' AND approver_role='finance'"), 'purchase order(s) waiting for your approval', 'purchasing');
+            $alert(self::n($p, "SELECT COUNT(*) AS n FROM purchase_orders WHERE status='Pending Approval' AND approver_role='finance'"), 'purchase order(s) waiting for your approval', 'purchase_orders');
             $alert(self::n($p, "SELECT COUNT(*) AS n FROM fund_requests f JOIN trips t ON t.id=f.trip_id WHERE f.status='Released' AND f.liquidation_status='Not Liquidated' AND t.status IN ('Completed','Cancelled')"), 'released fund(s) to liquidate', 'funds', 'info');
-            if (!$b) $alerts[] = ['text' => 'No active purchasing budget. Purchase orders will be rejected until a budget is set (Finance > Purchasing budget).', 'page' => 'finance', 'level' => 'danger'];
+            if (!$b) $alerts[] = ['text' => 'No purchasing budget covers today (none set, or its period ended). Purchase orders will be rejected until Finance sets one.', 'page' => 'finance', 'level' => 'danger'];
         } elseif ($r === 'billing') {
             $cards = [
                 ['label' => 'Ongoing trip drafts', 'value' => self::n($p, "SELECT COUNT(*) AS n FROM billings WHERE status='Ongoing'"), 'icon' => 'bi-hourglass', 'page' => 'billing'],
@@ -222,7 +226,8 @@ final class Analytics {
     // =================================================================
     // REPORTS
     // =================================================================
-    private static function reports(array $u, array $q): array {
+    /** $purchasing = the Purchasing Reports page: inventory/purchasing section only. The general Reports page no longer carries it. */
+    private static function reports(array $u, array $q, bool $purchasing = false): array {
         $p = db();
         $from = self::date($q['from'] ?? '') ?? date('Y-m-01');
         $to = self::date($q['to'] ?? '') ?? date('Y-m-d');
@@ -231,14 +236,18 @@ final class Analytics {
         $pFrom = date('Y-m-d', strtotime($from . " -$days days")); $pTo = date('Y-m-d', strtotime($from . ' -1 day'));
         $r = $u['role'];
         $sections = [];
-        if (in_array($r, ['admin', 'operations_head', 'audit'], true)) $sections['trips'] = self::tripReport($p, $q, $from, $to, $pFrom, $pTo);
-        if (in_array($r, ['admin', 'operations_head', 'motorpool', 'audit'], true)) $sections['fleet'] = self::fleetReport($p, $q, $from, $to);
-        if (in_array($r, ['admin', 'finance', 'billing', 'audit'], true)) $sections['money'] = self::moneyReport($p, $q, $from, $to, $pFrom, $pTo);
-        if (in_array($r, ['admin', 'purchasing', 'motorpool', 'finance', 'audit'], true)) $sections['stock'] = self::stockReport($p, $from, $to);
+        if (!$purchasing) {
+            if (in_array($r, ['admin', 'operations_head', 'audit'], true)) $sections['trips'] = self::tripReport($p, $q, $from, $to, $pFrom, $pTo);
+            if (in_array($r, ['admin', 'operations_head', 'motorpool', 'audit'], true)) $sections['fleet'] = self::fleetReport($p, $q, $from, $to);
+            if (in_array($r, ['admin', 'finance', 'billing', 'audit'], true)) $sections['money'] = self::moneyReport($p, $q, $from, $to, $pFrom, $pTo);
+        } elseif (in_array($r, ['admin', 'purchasing', 'finance', 'audit'], true)) {
+            $sections['stock'] = self::stockReport($p, $from, $to);
+        }
         // FLEETOPS_ACCESS_ANALYTICS_V1: derive bounded observations from already-authorized aggregates.
         $insights = self::reportInsights($sections);
         return ['sections' => $sections, 'insights' => $insights, 'period' => ['from' => $from, 'to' => $to, 'prevFrom' => $pFrom, 'prevTo' => $pTo],
-                'filterOptions' => readSections([
+                // Purchasing Reports needs no client / driver / dispatcher lists (and must not receive them).
+                'filterOptions' => $purchasing ? [] : readSections([
                     'clients' => fn() => many($p, 'SELECT id, company_name FROM clients ORDER BY company_name'),
                     'trucks' => fn() => many($p, 'SELECT id, plate_number FROM vehicles ORDER BY plate_number'),
                     'people' => fn() => many($p, 'SELECT id, full_name, person_type FROM personnel ORDER BY full_name'),
@@ -267,7 +276,7 @@ final class Analytics {
                 usort($truckRows, static fn($a, $b) => ((int)($b['delays'] ?? 0) + (int)($b['incidents'] ?? 0)) <=> ((int)($a['delays'] ?? 0) + (int)($a['incidents'] ?? 0)));
                 if ($truckRows && ((int)($truckRows[0]['delays'] ?? 0) + (int)($truckRows[0]['incidents'] ?? 0)) > 0) {
                     $top = $truckRows[0];
-                    $notes[] = ['title' => 'Most recorded truck disruptions', 'text' => (string)($top['name'] ?? 'Unknown truck') . ' has ' . (int)($top['delays'] ?? 0) . ' delay update(s) and ' . (int)($top['incidents'] ?? 0) . ' incident report(s). This identifies a review priority, not a proven root cause.', 'type' => 'diagnostic'];
+                    $notes[] = ['title' => 'Most recorded truck disruptions', 'text' => (string)($top['name'] ?? 'Unknown truck') . ' has ' . (int)($top['delays'] ?? 0) . ' delay update(s) and ' . (int)($top['incidents'] ?? 0) . ' incident report(s). These are recorded counts, not a proven root cause.', 'type' => 'diagnostic'];
                 }
             } elseif ($key === 'fleet') {
                 $rows = $tables['Highest downtime'] ?? [];
@@ -367,6 +376,160 @@ final class Analytics {
                 ['title' => 'Delays and incidents', 'columns' => [['When', 'at', 'datetime'], ['Trip', 'trip_ref'], ['Truck', 'plate_number'], ['Type', 'kind'], ['Details', 'details']], 'rows' => $issues],
             ],
         ];
+    }
+
+    /**
+     * MOTORPOOL_REPORTS_V2 — Maintenance Reports & Analytics (Motorpool "Reports"). Read-only SQL over recorded records.
+     *
+     * DEFINITIONS (all respect ?from=&to=, max 731 days; default: the 1st of the month two months back .. today)
+     *  Completed repairs   jobs (not cancelled) with completed_on in the period.
+     *  Ongoing repairs     NOW (snapshot): open jobs (open_key=1: not cancelled, not yet verified), incl. awaiting verification.
+     *  Trucks serviced     distinct trucks with a job completed (completed_on) in the period.
+     *  Maintenance cost    parts used + recorded repair costs, each recognised on its own event date:
+     *                        parts used  = Stock Out movements issued against parts requests (stock_movements, release date,
+     *                                      quantity x unit cost recorded on the movement);
+     *                        other       = maintenance_costs by cost_type (incurred_on).
+     *                      Purchase orders, PO payments and stock receipts are NOT maintenance expense and are never added.
+     *  Timeline buckets    day (<= 31 days), week (Mon-Sun, <= 186 days) or month; each bucket clipped to the period.
+     *    Reported          jobs by reported_on (business date).       Completed  jobs by completed_on.
+     *    Parts requests    requests CREATED in the bucket (any status).
+     *    Under repair / Awaiting verification: status at the END of each bucket, rebuilt from maintenance_events (the
+     *                      recorded status history). Omitted, with the reason, when any job lacks a recorded history.
+     *  Suggestions         explainable rules only (suggestRules); never create or change records.
+     */
+    private static function maintenanceReport(array $u, array $q): array {
+        must(Access::canOpen($u, 'maintenance_reports'), 'Not allowed.', 403);
+        $p = db();
+        $from = self::date($q['from'] ?? '') ?? date('Y-m-01', strtotime('first day of -2 months'));
+        $to = self::date($q['to'] ?? '') ?? date('Y-m-d');
+        if ($to < $from) [$from, $to] = [$to, $from];
+        if ((strtotime($to) - strtotime($from)) / 86400 > 731) $from = date('Y-m-d', strtotime($to . ' -731 days'));
+        $per = [$from, $to];
+        $buckets = self::buckets($from, $to);
+        $idx = function (?string $d) use ($buckets): ?int {
+            if (!$d) return null; $d = substr($d, 0, 10);
+            foreach ($buckets as $i => $b) if ($d >= $b['from'] && $d <= $b['to']) return $i;
+            return null;
+        };
+        $zero = array_fill(0, count($buckets), 0);
+
+        $data = readSections([
+            'kpis' => fn() => array_map('intval', one($p, "SELECT
+                    (SELECT COUNT(*) FROM maintenance_jobs WHERE status<>'Cancelled' AND completed_on BETWEEN ? AND ?) AS completed,
+                    (SELECT COUNT(DISTINCT vehicle_id) FROM maintenance_jobs WHERE status<>'Cancelled' AND completed_on BETWEEN ? AND ?) AS trucks_serviced,
+                    (SELECT COUNT(*) FROM maintenance_jobs WHERE open_key=1) AS ongoing,
+                    (SELECT COUNT(*) FROM maintenance_jobs WHERE open_key=1 AND status='Completed') AS awaiting_verification", [$from, $to, $from, $to])),
+            'cost' => function () use ($p, $per) {
+                $parts = (float)one($p, "SELECT COALESCE(SUM(-quantity_delta*unit_cost),0) AS v, COUNT(*) AS n FROM stock_movements
+                    WHERE movement_type='Stock Out' AND reference_type='part_request' AND DATE(created_at) BETWEEN ? AND ?", $per)['v'];
+                $partsN = (int)one($p, "SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type='Stock Out' AND reference_type='part_request' AND DATE(created_at) BETWEEN ? AND ?", $per)['n'];
+                $types = array_map(fn($r) => ['type' => $r['cost_type'], 'n' => (int)$r['n'], 'total' => round((float)$r['total'], 2)],
+                    many($p, "SELECT cost_type, COUNT(*) AS n, SUM(amount) AS total FROM maintenance_costs WHERE incurred_on BETWEEN ? AND ? GROUP BY cost_type ORDER BY total DESC", $per));
+                return ['parts' => round($parts, 2), 'parts_n' => $partsN, 'types' => $types,
+                        'total' => round($parts + array_sum(array_column($types, 'total')), 2)];
+            },
+            'entries' => fn() => [
+                'parts' => many($p, "SELECT sm.created_at AS at, -sm.quantity_delta AS qty, sm.unit_cost, ROUND(-sm.quantity_delta*sm.unit_cost,2) AS value, pt.part_number, pt.description,
+                        v.plate_number, r.request_ref, m.job_ref, m.id AS job_id
+                    FROM stock_movements sm JOIN parts pt ON pt.id=sm.part_id LEFT JOIN vehicles v ON v.id=sm.vehicle_id
+                    LEFT JOIN part_requests r ON r.id=sm.reference_id LEFT JOIN maintenance_jobs m ON m.id=sm.maintenance_job_id
+                    WHERE sm.movement_type='Stock Out' AND sm.reference_type='part_request' AND DATE(sm.created_at) BETWEEN ? AND ? ORDER BY sm.created_at DESC, sm.id DESC LIMIT 300", $per),
+                'costs' => many($p, "SELECT c.incurred_on AS at, c.cost_type, c.description, c.provider, c.amount, m.job_ref, m.id AS job_id, v.plate_number
+                    FROM maintenance_costs c JOIN maintenance_jobs m ON m.id=c.maintenance_job_id JOIN vehicles v ON v.id=m.vehicle_id
+                    WHERE c.incurred_on BETWEEN ? AND ? ORDER BY c.incurred_on DESC, c.id DESC LIMIT 300", $per),
+            ],
+            'timeline' => function () use ($p, $per, $buckets, $idx, $zero, $to) {
+                $s = ['reported' => $zero, 'completed' => $zero, 'parts' => $zero, 'parts_open' => $zero];
+                foreach (many($p, "SELECT reported_on AS d FROM maintenance_jobs WHERE status<>'Cancelled' AND reported_on BETWEEN ? AND ?", $per) as $r) if (($i = $idx($r['d'])) !== null) $s['reported'][$i]++;
+                foreach (many($p, "SELECT completed_on AS d FROM maintenance_jobs WHERE status<>'Cancelled' AND completed_on BETWEEN ? AND ?", $per) as $r) if (($i = $idx($r['d'])) !== null) $s['completed'][$i]++;
+                foreach (many($p, "SELECT DATE(created_at) AS d, status FROM part_requests WHERE DATE(created_at) BETWEEN ? AND ?", $per) as $r) {
+                    if (($i = $idx($r['d'])) === null) continue;
+                    $s['parts'][$i]++;
+                    if (in_array($r['status'], ['Requested', 'Partially Released', 'Not Available'], true)) $s['parts_open'][$i]++;
+                }
+                // Status snapshots from the recorded history. Coverage: every job created up to the period end has history from creation.
+                $missing = (int)one($p, "SELECT COUNT(*) AS n FROM maintenance_jobs m WHERE m.created_at <= ?
+                        AND NOT EXISTS (SELECT 1 FROM maintenance_events e WHERE e.maintenance_job_id=m.id AND e.created_at <= m.created_at + INTERVAL 10 MINUTE)", [$to . ' 23:59:59'])['n'];
+                $omitted = [];
+                if ($missing > 0) {
+                    $omitted[] = ['series' => 'Under repair, Awaiting verification', 'reason' => "$missing repair record(s) have no recorded status history from their creation, so past statuses cannot be rebuilt."];
+                    $s['under_repair'] = null; $s['awaiting'] = null;
+                } else {
+                    $ev = many($p, "SELECT e.maintenance_job_id AS j, e.to_status, UNIX_TIMESTAMP(e.created_at) AS ts, UNIX_TIMESTAMP(m.verified_at) AS vts
+                        FROM maintenance_events e JOIN maintenance_jobs m ON m.id=e.maintenance_job_id WHERE e.created_at <= ? ORDER BY e.maintenance_job_id, e.id", [$to . ' 23:59:59']);
+                    $s['under_repair'] = $zero; $s['awaiting'] = $zero;
+                    foreach ($buckets as $i => $b) {
+                        $t = min(time(), strtotime($b['to'] . ' 23:59:59'));
+                        $state = []; $vts = [];
+                        foreach ($ev as $e) if ((int)$e['ts'] <= $t) { $state[$e['j']] = $e['to_status']; $vts[$e['j']] = $e['vts'] === null ? null : (int)$e['vts']; }
+                        foreach ($state as $j => $st) {
+                            if ($st === 'Under Repair') $s['under_repair'][$i]++;
+                            elseif ($st === 'Completed' && ($vts[$j] === null || $vts[$j] > $t)) $s['awaiting'][$i]++;
+                        }
+                    }
+                }
+                $s['omitted'] = $omitted;
+                $s['basis'] = ['reported' => 'date reported', 'completed' => 'repair completion date', 'parts' => 'request date',
+                               'status' => 'status at the end of each period, from the recorded status history (time of each update)'];
+                return $s;
+            },
+            'frequency' => fn() => many($p, "SELECT v.id, v.plate_number, v.truck_number, v.truck_type, COUNT(m.id) AS repairs
+                    FROM vehicles v LEFT JOIN maintenance_jobs m ON m.vehicle_id=v.id AND m.status<>'Cancelled' AND m.reported_on BETWEEN ? AND ?
+                    WHERE v.active=1 GROUP BY v.id, v.plate_number, v.truck_number, v.truck_type ORDER BY repairs DESC, v.plate_number", $per),
+            'now' => fn() => array_map('intval', one($p, "SELECT
+                    (SELECT COUNT(*) FROM maintenance_jobs WHERE open_key=1 AND status='Completed') AS awaiting_verification,
+                    (SELECT COUNT(DISTINCT m.id) FROM maintenance_jobs m JOIN part_requests r ON r.maintenance_job_id=m.id
+                        WHERE m.status IN ('Under Inspection','Under Repair') AND r.status IN ('Requested','Partially Released','Not Available')) AS waiting_parts"))
+                + ['first_record' => one($p, "SELECT MIN(reported_on) AS d FROM maintenance_jobs")['d']],
+        ]);
+        $data['period'] = ['from' => $from, 'to' => $to, 'granularity' => self::bucketUnit($from, $to)];
+        $data['buckets'] = $buckets;
+        $data['suggestions'] = self::suggestRules($data, $buckets);
+        return $data;
+    }
+
+    /** Bucket size for the timeline: day up to 31 days, week (Mon-Sun) up to 186 days, otherwise month. */
+    public static function bucketUnit(string $from, string $to): string {
+        $days = (int)round((strtotime($to) - strtotime($from)) / 86400) + 1;
+        return $days <= 31 ? 'day' : ($days <= 186 ? 'week' : 'month');
+    }
+    /** Consecutive buckets covering exactly $from..$to (first/last clipped to the period). */
+    public static function buckets(string $from, string $to): array {
+        $unit = self::bucketUnit($from, $to); $out = []; $cur = $from;
+        while ($cur <= $to) {
+            $end = match ($unit) {
+                'day' => $cur,
+                'week' => date('Y-m-d', strtotime($cur . ' +' . (7 - (int)date('N', strtotime($cur))) . ' days')),
+                default => date('Y-m-t', strtotime($cur)),
+            };
+            if ($end > $to) $end = $to;
+            $label = match ($unit) { 'day' => date('M j', strtotime($cur)), 'week' => 'Week of ' . date('M j', strtotime($cur)), default => date('M Y', strtotime($cur)) };
+            $out[] = ['from' => $cur, 'to' => $end, 'label' => $label, 'short' => $unit === 'month' ? date('M Y', strtotime($cur)) : date('M j', strtotime($cur))];
+            $cur = date('Y-m-d', strtotime($end . ' +1 day'));
+        }
+        return $out;
+    }
+
+    /**
+     * Rule-based suggestions (no model, no prediction). Each rule needs enough records before it speaks:
+     *  R1 pending verification  NOW: completed repairs not yet verified (count > 0).
+     *  R2 waiting for parts     NOW: repairs Under Inspection / Under Repair with an open linked parts request.
+     *  Per period point          more reported than completed (>= 2 reported); parts requests created then and still open.
+     *  UNSUPPORTED_CLASSIFICATION_CLEANUP: no "unusually high" period (no validated comparison method) and no frequent-truck
+     *  threshold (no company policy). Repair counts per truck stay as factual counts in the frequency chart and lists.
+     */
+    public static function suggestRules(array $d, array $buckets): array {
+        $out = ['timeline' => [], 'trucks' => [], 'points' => array_fill(0, count($buckets), [])];
+        $now = $d['now'] ?? []; $tl = $d['timeline'] ?? [];
+        if (!empty($now['awaiting_verification'])) $out['timeline'][] = ['text' => $now['awaiting_verification'] . ' completed repair(s) are waiting for verification.', 'go' => 'maintenance?view=verify', 'label' => 'Verify'];
+        if (!empty($now['waiting_parts'])) $out['timeline'][] = ['text' => $now['waiting_parts'] . ' active repair(s) have an open parts request: follow up with Purchasing.', 'go' => 'mp_parts_requests?status=open', 'label' => 'Parts requests'];
+        foreach ($buckets as $i => $b) {
+            $r = (int)($tl['reported'][$i] ?? 0); $c = (int)($tl['completed'][$i] ?? 0); $po = (int)($tl['parts_open'][$i] ?? 0);
+            $range = 'from=' . $b['from'] . '&to=' . $b['to'];
+            if ($r >= 2 && $r > $c) $out['points'][$i][] = ['text' => "More repairs were reported ($r) than completed ($c) in this period.", 'go' => 'maintenance?view=all&cancelled=0&' . $range, 'label' => 'Open these repairs'];
+            if ($po > 0) $out['points'][$i][] = ['text' => "$po parts request(s) made in this period are still open.", 'go' => 'mp_parts_requests?status=open&' . $range, 'label' => 'Open parts requests'];
+        }
+        return $out;
     }
 
     /** 5.3: downtime (days Under Maintenance, from the truck status log) and maintenance cost per truck. */

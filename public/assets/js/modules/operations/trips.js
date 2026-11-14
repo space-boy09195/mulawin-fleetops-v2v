@@ -59,7 +59,7 @@ const TripUI = {
       case 'Dispatched': case 'In Transit': return 'On the road. Dispatcher monitors the trip and completes it with the waybill and acknowledgement receipt.';
       case 'On Hold - Incident Reported':
         if (t.incident_status === 'Reported') return 'Maintenance assesses the damage (minor or major).';
-        if (t.incident_status === 'Repaired - Cleared to Continue') return 'Repaired on site. Dispatcher resumes the trip.';
+        if (t.incident_status === 'Repaired - Cleared to Continue') return 'Motorpool recorded Fit to Continue. Dispatcher resumes the trip.';
         return 'Mechanic is repairing the truck on site.';
       case 'For Reschedule': return t.truck_status === 'Assigned' ? 'Truck is repaired. Dispatcher reschedules the trip.' : 'Truck is being repaired (major damage). Then the dispatcher reschedules.';
       case 'Completed':
@@ -349,6 +349,9 @@ const TripUI = {
     if (ops) {
       if (pre.includes(t.status)) acts.push(btn('edit', 'Edit details', 'outline-secondary', 'bi-pencil'));
       if (pre.includes(t.status)) acts.push(btn('cancel', 'Cancel trip', 'outline-danger', 'bi-x-circle'));
+      const lastInc = r.incidents[r.incidents.length - 1];
+      if (t.status === 'On Hold - Incident Reported' && lastInc && lastInc.severity === 'Minor' && lastInc.clearance === 'Not Fit to Continue')
+        acts.push(btn('increschedule', 'Move to For Reschedule (not fit)', 'outline-danger', 'bi-calendar-x'));
     }
     if (mine) {
       const curFund = r.funds.find(f => +f.attempt_number === +t.attempt_number);
@@ -387,18 +390,16 @@ const TripUI = {
     const ins = r.inspections.find(i => +i.attempt_number === +t.attempt_number && i.kind === 'Pre-Dispatch');
     const arr = r.inspections.find(i => +i.attempt_number === +t.attempt_number && i.kind === 'Arrival');
     const crew = [['Driver', t.driver_name], ...(t.truck_type === 'Car Carrier' ? [['Driver 2', t.driver2_name]] : [['Helper', t.helper_name]])];
-    // CHECKLIST_42_ATTENDANCE_ENFORCEMENT_V1: attendance per crew member for the shift of "dispatch now" (server data).
+    // CHECKLIST_42_ATTENDANCE_ENFORCEMENT_V1: attendance per crew member for the date of "dispatch now" (server data).
     const att = t.crew_attendance;
     const attBadge = (role) => {
       const c = att && att.crew.find(x => x.role === role);
       if (!c) return '';
       const color = c.problem ? (att.mode === 'Enforce' ? 'red' : 'amber') : 'green';
-      return ` <span class="badge-s ${color}">${UI.esc(c.issue || 'Present')}</span>`
-        + (c.duty_shift ? ` <span class="small text-muted">${UI.esc(c.duty_shift)} shift</span>` : '')
-        + (c.outside_scheduled_shift ? ` <span class="badge-s amber" title="Assigned outside the trip's scheduled shift (Warn-mode fallback or manual choice)">Outside trip shift</span>` : '');
+      return ` <span class="badge-s ${color}">${UI.esc(c.issue || 'Present')}</span>`;
     };
     const missingRow = att && att.missing && att.missing.length ? ['Crew required', att.missing.map(m => `<div class="small text-danger"><i class="bi bi-exclamation-octagon"></i> ${UI.esc(m)}</div>`).join('')] : null;
-    const attRow = att && att.crew.length ? ['Crew attendance', `<span class="small">${UI.esc(att.mode)} mode · Confirm Dispatch now: ${UI.esc(att.dispatch_shift)} · Trip scheduled: ${UI.esc(att.scheduled_shift)}</span>`
+    const attRow = att && att.crew.length ? ['Crew attendance', `<span class="small">${UI.esc(att.mode)} mode · Confirm Dispatch now: ${UI.esc(att.dispatch_day)} · Trip scheduled: ${UI.esc(att.scheduled_day)}</span>`
       + att.crew.filter(c => c.problem).map(c => `<div class="small ${att.mode === 'Enforce' ? 'text-danger' : 'text-warning-emphasis'}"><i class="bi bi-exclamation-triangle"></i> ${UI.esc(c.problem)}</div>`).join('')] : null;
     let checklistHtml = '<div class="text-muted small">Not done yet.</div>';
     if (ins) {
@@ -437,7 +438,7 @@ const TripUI = {
       ${UI.h('Pre-dispatch checklist' + (+t.attempt_number > 1 ? ' (attempt #' + t.attempt_number + ')' : ''))}${checklistHtml}
       ${t.status === 'Completed' ? UI.h('Arrival checklist') + TripUI.arrivalHtml(t, ins, arr) : ''}
       ${r.incidents.length ? UI.h('Incidents') + r.incidents.map(i => `<div class="border rounded p-2 mb-2 small"><div class="d-flex justify-content-between"><b>${UI.esc(i.incident_ref)} · ${UI.esc(i.incident_type)}</b>${UI.badge(i.status)}</div>
-          ${UI.esc(i.problem)} · ${UI.esc(i.location)} · ${UI.datetime(i.incident_at)}${i.recommendation ? '<br>Recommendation: ' + UI.esc(i.recommendation) : ''}${i.job_ref ? '<br>Maintenance record: ' + UI.esc(i.job_ref) + (i.job_status ? ' (' + UI.esc(i.job_status) + ')' : '') : ''}
+          ${UI.esc(i.problem)} · ${UI.esc(i.location)} · ${UI.datetime(i.incident_at)}${i.recommendation ? '<br>Recommendation: ' + UI.esc(i.recommendation) : ''}${i.job_ref ? '<br>Maintenance record: ' + UI.esc(i.job_ref) + (i.job_status ? ' (' + UI.esc(i.job_status) + ')' : '') : ''}${i.severity ? '<br>Damage classification: ' + UI.esc(i.severity) : ''}${i.clearance ? '<br>Motorpool clearance: <b>' + UI.esc(i.clearance) + '</b> · ' + UI.esc(i.cleared_by_name || '') + ' · ' + UI.datetime(i.cleared_at) + '<br><span class="text-muted">' + UI.esc(i.clearance_findings || '') + '</span>' : ''}${i.resumed_at ? '<br>Resumed by ' + UI.esc(i.resumed_by_name || '') + ' · ' + UI.datetime(i.resumed_at) : ''}
           <div><button class="btn btn-link btn-sm p-0" data-printinc="${i.id}">Print Incident Report Form</button></div></div>`).join('') : ''}
       ${t.status === 'Completed' ? UI.h('Completion') + UI.kv([['Completed', UI.datetime(t.completed_at)], ['Waybill no.', UI.e(t.waybill_number)], ['Notes', UI.e(t.delivery_notes)],
           r.billing ? ['Billing', UI.badge(r.billing.status) + ' ' + UI.money(r.billing.total_amount)] : null]) : ''}
@@ -477,6 +478,9 @@ const TripUI = {
         { name: 'diesel_po', label: 'Diesel PO file(s)', type: 'file', multiple: true, required: true, col: 12, attrs: 'accept="application/pdf,image/jpeg,image/png,image/webp"', help: 'PDF, JPG, PNG or WebP, up to 10 MB each.' }],
         'Trips.diesel_po', { extra: { trip_id: t.id }, intro: 'Optional. The Diesel PO is kept with the trip documents (Finance can view it).', after: () => { TripUI.open(t.id); App.route(); } });
       if (a === 'incident') TripUI.incident(t);
+      if (a === 'increschedule') UI.formModal('For Reschedule · ' + UI.esc(t.trip_ref), [{ name: 'reason', label: 'Reason (Operations decision)', type: 'textarea', required: true, col: 12 }],
+        'Trips.incident_reschedule', { extra: { trip_id: t.id }, submit: 'Move to For Reschedule', after: () => { TripUI.open(t.id); App.route(); },
+          intro: 'Motorpool recorded <b>Not Fit to Continue</b> for this Minor incident. The classification and history are kept; the dispatcher reschedules after the repair is verified, or selects another eligible fixed pair.' });
       if (a === 'resume') UI.confirmAction('Resume ' + UI.esc(t.trip_ref), 'The trip continues (In Transit). This is not a second attempt.', 'Trips.resume', { trip_id: t.id }, { submit: 'Resume trip' });
       if (a === 'reschedule') UI.formModal('Reschedule ' + UI.esc(t.trip_ref), [{ name: 'scheduled_at', label: 'New dispatch schedule', type: 'datetime', required: true, col: 12, attrs: `min="${UI.nowManila()}" max="${UI.nowManila(365 * 1440)}"`, help: 'Present or future date and time (Philippine time).' }], 'Trips.reschedule',
         { extra: { trip_id: t.id }, intro: 'After rescheduling, do the pre-dispatch checklist again. Confirm Redispatch records the Second Attempt.', after: () => { TripUI.open(t.id); App.route(); } });

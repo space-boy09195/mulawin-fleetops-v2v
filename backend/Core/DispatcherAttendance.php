@@ -15,7 +15,8 @@ final class DispatcherAttendance {
     }
     public static function absent(PDO $p,int $id,?array $session=null,bool $lock=false): bool {
         $since=$session['time_in']??date('Y-m-d').' 00:00:00';
-        $mark=one($p,'SELECT status FROM attendance_marks WHERE personnel_id=? AND marked_at>=? ORDER BY marked_at DESC,id DESC LIMIT 1'.($lock?' LOCK IN SHARE MODE':''),[$id,$since]);
+        // Admin daily attendance (attendance_daily) is the Absent authority; a back-dated mark for an earlier date does not apply.
+        $mark=one($p,'SELECT status FROM attendance_daily WHERE personnel_id=? AND marked_at>=? AND duty_date>=DATE(?) ORDER BY marked_at DESC,id DESC LIMIT 1'.($lock?' LOCK IN SHARE MODE':''),[$id,$since,$since]);
         return ($mark['status']??null)==='Absent';
     }
     public static function blocker(PDO $p, array $u, int $id, ?int $tripId = null, bool $lock = false): ?string {

@@ -17,7 +17,7 @@ $client=insert($p,'clients',['company_name'=>'V43 ISOLATED CLIENT','status'=>'Ac
 foreach(TRUCK_TYPES as $type)insert($p,'client_rates',['client_id'=>$client,'truck_type'=>$type,'rate_per_km'=>'50','minimum_charge'=>'0','updated_by'=>$users['billing']['id']]);
 $requested=Routes::action($ops,'request',['client_id'=>$client,'truck_type'=>'Container','origin'=>'V43 PICKUP','destination'=>'V43 DELIVERY','distance_km'=>'50']);$route=$requested['route_id'];
 v43_check(!(RouteDistance::selectable($p,$client,'Container')),'Pending route is not selectable');
-Routes::action($users['billing'],'rate_enter',['route_id'=>$route,'rate_type'=>'Flat','rate_amount'=>'2500']);$rate=one($p,'SELECT id FROM client_route_rates WHERE route_id=?',[$route]);Routes::action($admin,'decide',['rate_id'=>$rate['id'],'decision'=>'approve']);
+Routes::action($admin,'rate_enter',['route_id'=>$route,'rate_type'=>'Flat','rate_amount'=>'2500']);$rate=one($p,'SELECT id FROM client_route_rates WHERE route_id=?',[$route]);v43_check(one($p,'SELECT status FROM client_route_rates WHERE id=?',[$rate['id']])['status']==='Approved','Admin rate entry activates the approved fixed route');
 v43_check(count(RouteDistance::selectable($p,$client,'Container'))===1,'Existing route request/rate/Admin approval workflow remains');
 $helper=Fleet::action($ops,'crew_save',['person_type'=>'Helper','full_name'=>'HELPER, REGULAR'])['id'];
 $helper2=Fleet::action($ops,'crew_save',['person_type'=>'Helper','full_name'=>'HELPER, REPLACEMENT'])['id'];
@@ -30,8 +30,8 @@ v43_refuse(fn()=>Fleet::action($ops,'crew_save',['person_type'=>'Driver','full_n
 v43_check(!one($p,"SELECT id FROM personnel WHERE full_name='DRIVER, DUPLICATE'"),'Failed assignment rolls back the newly inserted Driver');
 v43_refuse(fn()=>Fleet::action($ops,'truck_save',['id'=>$truck2,'plate_number'=>'V43002','truck_type'=>'Container','assigned_driver_id'=>$driver,'assigned_helper_id'=>$helper2]),'Truck-side save cannot give one Driver a second active fixed Truck');
 v43_refuse(fn()=>run($p,'UPDATE vehicles SET assigned_driver_id=? WHERE id=?',[$driver,$truck2]),'Database uniqueness independently prevents duplicate fixed Driver assignment');
-foreach([$driver,$driver2,$helper,$helper2] as $id){$person=one($p,'SELECT * FROM personnel WHERE id=?',[$id]);Fleet::action($admin,'crew_save',array_merge($person,['id'=>$id,'duty_shift'=>$shift['shift']]));}
-$base=['client_id'=>$client,'truck_type'=>'Container','client_route_id'=>$route,'scheduled_at'=>date('Y-m-d\TH:i',time()+3600),'pickup_point'=>'V43 PICKUP','delivery_point'=>'V43 DELIVERY','distance_km'=>'50','dispatcher_assignment'=>'container_wingvan_dispatcher:'.$shift['shift']];
+// Personnel readiness comes from open Dispatcher sessions; permanent crew shifts are retired.
+$base=['client_id'=>$client,'truck_type'=>'Container','client_route_id'=>$route,'scheduled_at'=>date('Y-m-d\TH:i',time()+3600),'pickup_point'=>'V43 PICKUP','delivery_point'=>'V43 DELIVERY','distance_km'=>'50','dispatcher_assignment'=>'container_wingvan_dispatcher:'.$shift['shift'],'responsible_dispatcher_id'=>$cw['id']]; // kenneth: explicit responsible account
 $created=Trips::action($ops,'create',$base+['request_key'=>v43_key()]);$id=$created['trip_id'];$trip=one($p,'SELECT * FROM trips WHERE id=?',[$id]);
 v43_check($trip['status']==='Awaiting Resources'&&!$trip['vehicle_id']&&!$trip['driver_id']&&!$trip['helper_id'],'Operations Head creates directly without approval or resource allocation');
 v43_check(!(many($p,'SELECT * FROM trip_assignments WHERE trip_id=?',[$id])),'Creation holds no Truck or personnel');
@@ -80,37 +80,43 @@ $incident=Trips::action($cw,'incident',['trip_id'=>$id,'incident_type'=>'Breakdo
 $job=(int)one($p,'SELECT id FROM maintenance_jobs WHERE incident_id=?',[$incident])['id'];
 v43_check(one($p,'SELECT status FROM trips WHERE id=?',[$id])['status']==='On Hold - Incident Reported'&&$job>0,'Incident reporting holds the trip and opens its existing corrective maintenance record');
 v43_refuse(fn()=>Maintenance::action($ops,'assess',['job_id'=>$job]),'Monitoring visibility does not grant Operations Head mechanic processing');
-$mechanic=Mechanics::action($users['motorpool'],'save',['full_name'=>'V43 MECHANIC'])['id'];
+$mechanic=Mechanics::action($users['motorpool'],'save',['full_name'=>'V43 MECHANIC'])['id'];Mechanics::action($users['motorpool'],'time_in',['id'=>$mechanic]); // luis: a mechanic is assigned only after Time In
 Maintenance::action($users['motorpool'],'assess',['job_id'=>$job,'severity'=>'Minor','recommendation'=>'V43 on-site inspection','mechanic_id'=>$mechanic]);
 Maintenance::action($users['motorpool'],'inspect',['job_id'=>$job,'findings'=>'V43 fixture finding','diagnosis'=>'V43 fixture diagnosis']);
 Maintenance::action($users['motorpool'],'add_cost',['job_id'=>$job,'cost_type'=>'Labor','description'=>'V43 repair','amount'=>'50','incurred_on'=>date('Y-m-d')]);
 $_FILES=['evidence'=>$pdf('v43-repair.pdf')];Maintenance::action($users['motorpool'],'complete',['job_id'=>$job,'repair_performed'=>'V43 fixture repaired','completed_on'=>date('Y-m-d')]);$_FILES=[];
 Maintenance::action($users['motorpool'],'verify',['job_id'=>$job,'result'=>'Passed','verification_notes'=>'V43 safe to continue']);
+v43_refuse(fn()=>Trips::action($cw,'resume',['trip_id'=>$id]),'A verified repair alone does not authorize resumption (INCIDENT_CLEARANCE_V1)');
+Maintenance::action($users['motorpool'],'clearance',['job_id'=>$job,'decision'=>'Fit to Continue','findings'=>'V43 truck checked and fit to continue']);
 $coordination=Trips::action($ops,'monitor_details',['trip_id'=>$id]);v43_check($coordination['incidents'][0]['job_status']==='Completed','Read-only monitoring shows linked repair status from Maintenance');
 Trips::action($cw,'resume',['trip_id'=>$id]);v43_check(one($p,'SELECT status FROM trips WHERE id=?',[$id])['status']==='In Transit','Authorized Maintenance clearance enables the unchanged Dispatcher resume workflow');
 $completion=['trip_id'=>$id,'completed_at'=>date('Y-m-d\TH:i'),'waybill_number'=>'V43-WB'];
 v43_refuse(fn()=>Trips::action($cw,'complete',$completion),'Completion still requires waybill, acknowledgement and delivery receipt files');
 $_FILES=['waybill'=>$pdf('v43-waybill.pdf'),'ack_receipt'=>$pdf('v43-ar.pdf'),'delivery_receipt'=>$pdf('v43-dr.pdf'),'supplier_soa'=>$pdf('v43-soa.pdf')];Trips::action($cw,'complete',$completion);$_FILES=[];
 v43_check(Files::count($p,'trip',$id,'Supplier SOA')===1&&one($p,'SELECT status FROM trips WHERE id=?',[$id])['status']==='Completed','Real completion preserves required documents and optional Supplier SOA');
-v43_check(FleetState::awaitingArrival($p,$id)&&!one($p,"SELECT resource_id FROM trip_assignments WHERE trip_id=? AND resource_type='person'",[$id]),'Completion releases crew and retains the Truck until its arrival checklist');
+// kenneth 16dce05 (Trips::complete): delivery completion is not vehicle return; truck AND crew holds stay until the arrival checklist.
+v43_check(FleetState::awaitingArrival($p,$id),'Completion retains the Truck (and crew) holds until its arrival checklist');
 v43_check((int)DispatcherMonitoring::operationalCounts($p)['arrival']===1,'Pending arrival KPI uses the real returning vehicle hold');
 $history=Trips::read($ops,'dispatcher-monitoring',['group'=>$cw['role'],'shift'=>$shift['shift'],'tab'=>'history']);v43_check($history['total']===1&&$history['rows'][0]['id']==$id,'Monitoring separates saved completed history from active work');
 $historical=Trips::action($ops,'monitor_details',['trip_id'=>$id]);v43_check($historical['trip']['helper_name']==='HELPER, REPLACEMENT'&&$historical['trip']['dispatcher_name']===$cw['full_name'],'History retains actual trip Helper and recorded Dispatcher account');
 v43_check(count(DispatcherPlanning::groups())===4,'Monitoring groups come from the existing planning mapping');
 Trips::action($cw,'checklist_start',['trip_id'=>$id,'kind'=>'Arrival']);Trips::action($cw,'arrival',['trip_id'=>$id,'items'=>$items,'fuel_level'=>'Full','odometer_km'=>200]);
 v43_check(!FleetState::awaitingArrival($p,$id)&&one($p,'SELECT status FROM vehicles WHERE id=?',[$truck])['status']==='Available','Real arrival checklist releases the returning Truck');
+v43_check(!one($p,"SELECT resource_id FROM trip_assignments WHERE trip_id=? AND resource_type='person'",[$id]),'Real arrival checklist also releases the crew holds');
 v43_check(!one($p,'SELECT vehicle_id FROM trips WHERE id=?',[$second])['vehicle_id'],'Completion and arrival do not auto-allocate another waiting trip');
 Funds::action($users['finance'],'liquidate',['fund_id'=>$fund,'liquidated_amount'=>'100','liquidation_notes'=>'V43 isolated balance']);
 v43_check(one($p,'SELECT returned_amount FROM fund_requests WHERE id=?',[$fund])['returned_amount']==='23.45','Existing Finance liquidation retains actual spent and returned cash');
 $financeDocs=Documents::read($users['finance'],'documents',[]);v43_check(in_array('Supplier SOA',array_column($financeDocs['documents'],'category'),true),'Finance document projection retains completion attachments');
 // Reassignment protection and eligibility against real records, not UI-only constraints.
-insert($p,'attendance_marks',['duty_date'=>$shift['date'],'duty_shift'=>$shift['shift'],'personnel_id'=>$driver,'status'=>'Absent','marked_by'=>$admin['id']]);
+insert($p,'attendance_daily',['duty_date'=>date('Y-m-d'),'personnel_id'=>$driver,'status'=>'Absent','marked_by'=>$admin['id']]); // integrated: Admin daily attendance is the Absent authority
 v43_refuse(fn()=>Trips::action($cw,'assign_resources',['trip_id'=>$second,'vehicle_id'=>$truck,'helper_id'=>$helper]),'An absent fixed Driver makes its Truck ineligible');
-run($p,'DELETE FROM attendance_marks WHERE personnel_id=? AND duty_date=? AND duty_shift=?',[$driver,$shift['date'],$shift['shift']]);
+run($p,'DELETE FROM attendance_daily WHERE personnel_id=? AND duty_date=?',[$driver,date('Y-m-d')]);
 Fleet::action($ops,'truck_status',['id'=>$truck,'status'=>'Unavailable','reason'=>'V43 fixture restriction']);
 v43_refuse(fn()=>Trips::action($cw,'assign_resources',['trip_id'=>$second,'vehicle_id'=>$truck,'helper_id'=>$helper]),'Unavailable Truck cannot be assigned despite a timed-in fixed Driver');
 Fleet::action($ops,'truck_status',['id'=>$truck,'status'=>'Available']);
-$wrongShift=array_merge($cw,['shift'=>$shift['shift']==='Day'?'Night':'Day']);
+// kenneth 8220af6: responsibility belongs to the planned ACCOUNT; a real other-shift account of the same group is not responsible.
+$otherShift=$shift['shift']==='Day'?'Night':'Day';$wrongShiftId=insert($p,'users',['username'=>'v43_other_shift','email'=>'v43_other_shift@example.test','password_hash'=>'fixture','full_name'=>'V43 other shift','role'=>$cw['role'],'shift'=>$otherShift]);
+$wrongShift=['id'=>$wrongShiftId,'role'=>$cw['role'],'shift'=>$otherShift,'full_name'=>'V43 other shift'];
 v43_refuse(fn()=>Trips::action($wrongShift,'assign_resources',['trip_id'=>$second,'vehicle_id'=>$truck,'helper_id'=>$helper]),'Other shift cannot allocate a group-owned trip through a direct API');
 Trips::action($cw,'assign_resources',['trip_id'=>$second,'vehicle_id'=>$truck,'helper_id'=>$helper]);
 // Current held crew remain candidates for their own rescheduled trip, but never another trip.
@@ -132,7 +138,9 @@ $query=['page'=>'dispatcher-monitoring','group'=>$cw['role'],'shift'=>$shift['sh
 $_SESSION=['uid'=>$ops['id'],'last_seen'=>time(),'login_at'=>time()];
 $page=Actions::pageData($query['page'],$query);v43_check($page['page']===2&&$page['total']===14&&count($page['rows'])===2,'Monitoring pagination passes the authenticated page authorization boundary with the correct second-page total');
 $historyPage=Actions::pageData('dispatcher-monitoring',array_merge($query,['tab'=>'history','trip_page'=>1]));
-v43_check($historyPage['total']===1&&$historyPage['rows'][0]['id']==$id&&$historyPage['rows'][0]['dispatcher_role']===$cw['role']&&$historyPage['rows'][0]['dispatcher_shift']===$shift['shift'],'Authenticated Trip History preserves the completed trip and recorded group/shift');
+$closed=(int)one($p,"SELECT COUNT(*) AS n FROM trips WHERE status IN ('Completed','Cancelled','Rejected') AND dispatcher_role=? AND dispatcher_shift=?",[$cw['role'],$shift['shift']])['n']; // History = Completed, Cancelled, Rejected (the cancelled reschedule fixture counts too)
+$done=array_values(array_filter($historyPage['rows'],fn($r)=>(int)$r['id']===(int)$id));
+v43_check($historyPage['total']===$closed&&count($done)===1&&$done[0]['dispatcher_role']===$cw['role']&&$done[0]['dispatcher_shift']===$shift['shift'],'Authenticated Trip History preserves the completed trip and recorded group/shift');
 $historyEmpty=Actions::pageData('dispatcher-monitoring',array_merge($query,['tab'=>'history','search'=>'NO-MATCH-'.v43_key()]));
 v43_check($historyEmpty['rows']===[]&&$historyEmpty['total']===0&&$historyEmpty['page']===1,'Authenticated empty history returns an empty paginated result instead of access denied');
 try{Actions::pageData('1',['page'=>'1','tab'=>'history']);v43_check(false,'Numeric page identifiers remain forbidden');}catch(BusinessRuleException $error){v43_check($error->httpStatus===403,'Numeric page identifiers remain forbidden');}
@@ -156,9 +164,9 @@ $archive=Trips::read($ops,'trips',['tab'=>'history','legacy'=>1]);v43_check(in_a
 Notify::user($p,$ops['id'],'Trip request','Historical task','trips','trip-review-'.$request);$bell=Notify::forUser($p,$ops['id']);
 v43_check(!in_array('Historical task',array_column($bell['items'],'message'),true)&&(bool)one($p,'SELECT id FROM notifications WHERE dedupe_key=?',['trip-review-'.$request]),'Retired approval tasks leave the active bell while preserving notification history');
 // Car Carrier keeps its existing second Driver slot and no Helper relationship.
-$ccRoute=Routes::action($ops,'request',['client_id'=>$client,'truck_type'=>'Car Carrier','origin'=>'V43 CC PICKUP','destination'=>'V43 CC DELIVERY','distance_km'=>'50'])['route_id'];Routes::action($users['billing'],'rate_enter',['route_id'=>$ccRoute,'rate_type'=>'Flat','rate_amount'=>'3000']);$ccRate=one($p,'SELECT id FROM client_route_rates WHERE route_id=?',[$ccRoute]);Routes::action($admin,'decide',['rate_id'=>$ccRate['id'],'decision'=>'approve']);
-$ccTrucks=[];$ccDrivers=[];for($n=1;$n<=2;$n++){$ccTrucks[]=Fleet::action($ops,'truck_save',['plate_number'=>'V43CC'.$n,'truck_type'=>'Car Carrier'])['id'];$ccDrivers[]=Fleet::action($ops,'crew_save',['person_type'=>'Driver','full_name'=>'V43 CC, DRIVER '.$n,'license_number'=>'V43-CC-L'.$n,'license_expiry'=>date('Y-m-d',strtotime('+2 years')),'fixed_truck_id'=>$ccTrucks[$n-1]])['id'];$pe=one($p,'SELECT * FROM personnel WHERE id=?',[$ccDrivers[$n-1]]);Fleet::action($admin,'crew_save',array_merge($pe,['id'=>$pe['id'],'duty_shift'=>$shift['shift']]));Attendance::action($cc,'time_in',['personnel_id'=>$pe['id'],'request_key'=>v43_key()]);}
-$ccTrip=Trips::action($ops,'create',array_merge($base,['truck_type'=>'Car Carrier','client_route_id'=>$ccRoute,'pickup_point'=>'V43 CC PICKUP','delivery_point'=>'V43 CC DELIVERY','dispatcher_assignment'=>$cc['role'].':'.$shift['shift'],'request_key'=>v43_key()]))['trip_id'];
+$ccRoute=Routes::action($ops,'request',['client_id'=>$client,'truck_type'=>'Car Carrier','origin'=>'V43 CC PICKUP','destination'=>'V43 CC DELIVERY','distance_km'=>'50'])['route_id'];Routes::action($admin,'rate_enter',['route_id'=>$ccRoute,'rate_type'=>'Flat','rate_amount'=>'3000']);$ccRate=one($p,'SELECT id FROM client_route_rates WHERE route_id=?',[$ccRoute]);v43_check(one($p,'SELECT status FROM client_route_rates WHERE id=?',[$ccRate['id']])['status']==='Approved','Admin rate entry activates the Car Carrier route');
+$ccTrucks=[];$ccDrivers=[];for($n=1;$n<=2;$n++){$ccTrucks[]=Fleet::action($ops,'truck_save',['plate_number'=>'V43CC'.$n,'truck_type'=>'Car Carrier'])['id'];$ccDrivers[]=Fleet::action($ops,'crew_save',['person_type'=>'Driver','full_name'=>'V43 CC, DRIVER '.$n,'license_number'=>'V43-CC-L'.$n,'license_expiry'=>date('Y-m-d',strtotime('+2 years')),'fixed_truck_id'=>$ccTrucks[$n-1]])['id'];$pe=one($p,'SELECT * FROM personnel WHERE id=?',[$ccDrivers[$n-1]]);Attendance::action($cc,'time_in',['personnel_id'=>$pe['id'],'request_key'=>v43_key()]);}
+$ccTrip=Trips::action($ops,'create',array_merge($base,['truck_type'=>'Car Carrier','client_route_id'=>$ccRoute,'pickup_point'=>'V43 CC PICKUP','delivery_point'=>'V43 CC DELIVERY','dispatcher_assignment'=>$cc['role'].':'.$shift['shift'],'responsible_dispatcher_id'=>$cc['id'],'request_key'=>v43_key()]))['trip_id'];
 v43_refuse(fn()=>Trips::action($cw,'assign_resources',['trip_id'=>$ccTrip,'vehicle_id'=>$truck,'helper_id'=>$helper]),'Cross-group assignment remains unauthorized');
 v43_refuse(fn()=>Trips::action($cc,'assign_resources',['trip_id'=>$ccTrip,'vehicle_id'=>$ccTrucks[0],'driver2_id'=>$ccDrivers[0]]),'Car Carrier refuses the same Driver in both slots');
 Trips::action($cc,'assign_resources',['trip_id'=>$ccTrip,'vehicle_id'=>$ccTrucks[0],'driver2_id'=>$ccDrivers[1]]);$ccSaved=one($p,'SELECT driver_id,driver2_id,helper_id FROM trips WHERE id=?',[$ccTrip]);v43_check((int)$ccSaved['driver_id']===$ccDrivers[0]&&(int)$ccSaved['driver2_id']===$ccDrivers[1]&&$ccSaved['helper_id']===null,'Car Carrier manual selection retains fixed primary Driver and a distinct eligible co-driver');

@@ -1,7 +1,5 @@
 # Changelog
 
-<<<<<<< HEAD
-=======
 ## 2026-11-10 (Role workspaces: Maintenance and Purchasing)
 - **Motorpool Custodian** lands on the existing **Maintenance Overview** (unchanged apart from its links). Sidebar: Maintenance
   Overview, Repair Management (`#maintenance`), Truck Masterlist, Mechanic Masterlist, Maintenance History (new, completed and
@@ -48,7 +46,6 @@
   and the test-data loader page. `automation/*.py` now use the new login and read the one-time password from the Admin screen.
 - No database change. Tables `login_otps` and `trusted_login_devices` stay in the database, unused. Tests: `tests/auth_no_otp_tests.php`.
 
->>>>>>> c426b55 (feat(auth): remove login OTP and add forced password change)
 ## 2026-11-08 (Batch trip planning)
 - **Trips → Batch planning**: enter up to 20 trips on one page. Every row becomes its own trip with its own number, using
   the same rules as New trip (auto-assignment or Awaiting Resources for the Operations Head; Pending Review requests for a

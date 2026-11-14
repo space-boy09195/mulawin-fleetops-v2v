@@ -25,6 +25,7 @@ final class Admin {
         if ($page === 'fuel-adjustment') return Settings::pricingRead($u);
         if ($page === 'notifications') return self::notificationsPage($u, $q);
         requireRole($u, 'admin', 'audit');
+        if (str_starts_with($page, 'audit_')) return self::auditPage($u, $p, $page, $q);
         $from = self::d((string)($q['from'] ?? '')) ?? date('Y-m-d', strtotime('-30 days'));
         $to = self::d((string)($q['to'] ?? '')) ?? date('Y-m-d');
         $w = 'WHERE DATE(a.created_at) BETWEEN ? AND ?'; $args = [$from, $to];
@@ -41,7 +42,7 @@ final class Admin {
         $data['range'] = ['from' => $from, 'to' => $to];
         if (hasRole($u, 'admin')) {
             $data = mergeSections($data, [
-                'users' => fn() => many($p, 'SELECT id, username, email, full_name, role, shift, active, last_login_at, created_at, (signature_document_id IS NOT NULL) AS has_signature FROM users ORDER BY active DESC, role, full_name'),
+                'users' => fn() => many($p, 'SELECT id, username, email, full_name, role, shift, active, must_change_password, last_login_at, created_at, (signature_document_id IS NOT NULL) AS has_signature FROM users ORDER BY active DESC, role, shift, full_name'),
                 'fundCategories' => fn() => many($p, 'SELECT * FROM fund_categories ORDER BY sort_order, name'),
             ]);
             $data['settings'] = Settings::all();
@@ -54,6 +55,82 @@ final class Admin {
         return $data;
     }
     private static function d(string $v): ?string { return ($v !== '' && DateTimeImmutable::createFromFormat('!Y-m-d', $v)) ? $v : null; }
+
+    /**
+     * AUDIT_WORKSPACE_V1 — read-only audit pages (Admin + Audit; Access already limits each page).
+     * Sources: audit_events (actor, area, record_ref, action, details, time) and audit_event_changes
+     * (field-level before/after, recorded only by auditWithChanges). Nothing here writes.
+     * Action types are derived from the recorded action text with fixed keyword rules (shown in the UI).
+     */
+    private const AUDIT_TYPES = [
+        'Approval' => '(approved|returned to service|verified)', 'Rejection' => '(rejected|failed)', 'Payment' => '(payment|paid|released|disburse|liquidat)',
+        'Cancellation' => '(cancel|withdraw|closed|deactivat|removed)', 'Creation' => '(created|added|submitted|reported|recorded|request)',
+        'Change' => '(changed|updated|adjusted|assigned|set|reset|saved|processed|received|activated|completed)',
+        'Sign-in' => '(signed in|signed out|login|logout)', 'Attendance' => '(time in|time out|attendance)', 'Document' => '(document|upload)',
+    ];
+    private static function auditType(string $action): string {
+        foreach (['Sign-in', 'Attendance', 'Document'] as $first) if (preg_match('/' . self::AUDIT_TYPES[$first] . '/i', $action)) return $first;
+        foreach (self::AUDIT_TYPES as $type => $re) if (preg_match('/' . $re . '/i', $action)) return $type;
+        return 'Other';
+    }
+    private static function auditPage(array $u, PDO $p, string $page, array $q): array {
+        $maxDays = 366;
+        $to = self::d((string)($q['to'] ?? '')) ?? date('Y-m-d');
+        $from = self::d((string)($q['from'] ?? '')) ?? date('Y-m-d', strtotime($to . ($page === 'audit_overview' ? ' -6 days' : ' -29 days')));
+        if ($from > $to) [$from, $to] = [$to, $from];
+        if ((new DateTimeImmutable($from))->diff(new DateTimeImmutable($to))->days >= $maxDays) $from = date('Y-m-d', strtotime($to . ' -' . ($maxDays - 1) . ' days'));
+        $w = 'WHERE a.created_at >= ? AND a.created_at < ? + INTERVAL 1 DAY'; $args = [$from, $to];
+        if ($page !== 'audit_overview') {
+            if (!empty($q['area'])) { $w .= ' AND a.area=?'; $args[] = (string)$q['area']; }
+            if (!empty($q['actor_id']) && ctype_digit((string)$q['actor_id'])) { $w .= ' AND a.actor_id=?'; $args[] = (int)$q['actor_id']; }
+            if (!empty($q['record'])) { $w .= ' AND a.record_ref=?'; $args[] = cut((string)$q['record'], 70); }
+        }
+        $events = fn(int $limit) => array_map(function ($e) { $e['type'] = self::auditType((string)$e['action']); $e['has_changes'] = $e['changes_json'] !== null; return $e; },
+            many($p, "SELECT a.id, a.area, a.record_ref, a.action, a.details, a.created_at, a.actor_id, COALESCE(us.full_name, 'System') AS actor, us.role, ac.changes_json
+                FROM audit_events a LEFT JOIN users us ON us.id=a.actor_id LEFT JOIN audit_event_changes ac ON ac.audit_event_id=a.id $w ORDER BY a.id DESC LIMIT $limit", $args));
+        $base = ['areas' => fn() => array_column(many($p, 'SELECT DISTINCT area FROM audit_events ORDER BY area'), 'area'),
+                 'actors' => fn() => many($p, 'SELECT DISTINCT us.id, us.full_name, us.role FROM audit_events a JOIN users us ON us.id=a.actor_id ORDER BY us.full_name')];
+        $data = match ($page) {
+            'audit_overview' => readSections([
+                'events' => fn() => $events(500),
+                'totals' => fn() => one($p, "SELECT COUNT(*) AS all_time, MIN(created_at) AS first_at, COALESCE(SUM(created_at >= CURRENT_DATE()),0) AS today,
+                        COALESCE(SUM(created_at >= CURRENT_DATE() - INTERVAL 29 DAY),0) AS last30 FROM audit_events"),
+                'withChanges' => fn() => (int)one($p, 'SELECT COUNT(*) AS n FROM audit_event_changes')['n'],
+            ]),
+            'audit_logs' => readSections(['events' => fn() => $events(3000)] + $base),
+            'audit_history' => readSections([
+                'records' => fn() => many($p, "SELECT a.area, a.record_ref, COUNT(*) AS events, MIN(a.created_at) AS first_at, MAX(a.created_at) AS last_at,
+                        SUBSTRING_INDEX(GROUP_CONCAT(a.action ORDER BY a.id DESC SEPARATOR '\n'), '\n', 1) AS last_action,
+                        SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(us.full_name,'System') ORDER BY a.id DESC SEPARATOR '\n'), '\n', 1) AS last_actor
+                    FROM audit_events a LEFT JOIN users us ON us.id=a.actor_id $w GROUP BY a.area, a.record_ref ORDER BY last_at DESC LIMIT 1000", $args),
+                'timeline' => fn() => !empty($q['record']) ? $events(500) : [],
+            ] + $base),
+            'audit_reports' => readSections([
+                'events' => fn() => $events(20000),
+                'byMonth' => fn() => many($p, "SELECT DATE_FORMAT(a.created_at,'%Y-%m') AS m, a.area, COUNT(*) AS n FROM audit_events a $w GROUP BY m, a.area ORDER BY m, a.area", $args),
+            ] + $base),
+            default => throw new BusinessRuleException('Unknown page.', 404),
+        };
+        // Reports aggregate the event list server-side so only counts are sent (no per-event details).
+        if ($page === 'audit_reports' && is_array($data['events'] ?? null)) {
+            $agg = ['type' => [], 'user' => [], 'area' => []];
+            foreach ($data['events'] as $e) {
+                $agg['type'][$e['type']] = ($agg['type'][$e['type']] ?? 0) + 1;
+                $k = $e['actor'] . '|' . ($e['role'] ?? '');
+                $agg['user'][$k] = ($agg['user'][$k] ?? 0) + 1;
+                $agg['area'][$e['area']]['n'] = ($agg['area'][$e['area']]['n'] ?? 0) + 1;
+                $agg['area'][$e['area']]['changes'] = ($agg['area'][$e['area']]['changes'] ?? 0) + ($e['has_changes'] ? 1 : 0);
+            }
+            $data['summary'] = ['total' => count($data['events']), 'truncated' => count($data['events']) >= 20000,
+                'byType' => $agg['type'], 'byUser' => array_map(fn($k, $n) => ['actor' => explode('|', $k)[0], 'role' => explode('|', $k)[1], 'n' => $n], array_keys($agg['user']), $agg['user']),
+                'byArea' => array_map(fn($k, $v) => ['area' => $k] + $v, array_keys($agg['area']), $agg['area'])];
+            unset($data['events']);
+        }
+        $data['range'] = ['from' => $from, 'to' => $to, 'max_days' => $maxDays];
+        $data['types'] = array_merge(array_keys(self::AUDIT_TYPES), ['Other']);
+        $data['roles'] = ROLE_LABELS;
+        return $data;
+    }
 
     public static function action(array $u, string $action, array $d): array {
         return match ($action) {
@@ -267,33 +344,21 @@ final class Admin {
         [$label, , $unit, , $min, $max] = Settings::DEFS[$key];
         $raw = trim((string)($d['value'] ?? ''));
         must(is_numeric($raw) && (float)$raw >= $min && (float)$raw <= $max, "$label must be a number from $min to $max.");
-        // CHECKLIST_42_ATTENDANCE_PHASE2_V1: shift start hours are whole hours and Day / Night must differ
-        // (identical hours would leave no Night shift in CrewAttendance::shiftFor).
-        $shiftKeys = ['attendance_day_start_hour' => 'attendance_night_start_hour', 'attendance_night_start_hour' => 'attendance_day_start_hour'];
-        if (isset($shiftKeys[$key])) must(ctype_digit($raw), "$label must be a whole hour (12:00 AM to 11:00 PM).");
+        // DAILY_ATTENDANCE_V1: the reminder hour is a whole hour.
+        $hourKeys = ['attendance_day_start_hour' => true, 'attendance_night_start_hour' => true];
+        if (isset($hourKeys[$key])) must(ctype_digit($raw), "$label must be a whole hour (12:00 AM to 11:00 PM).");
         if ($key === 'crew_attendance_dispatch_check') must(in_array($raw, ['1', '2'], true), "$label must be Warn (1) or Enforce (2).");
-        return transaction(function (PDO $p) use ($u, $key, $raw, $label, $shiftKeys) {
-            if ($key === 'crew_attendance_dispatch_check' && $raw === '2') {
-                // CHECKLIST_42_ATTENDANCE_ENFORCEMENT_V1: Enforce only when every active driver / helper has a shift.
-                $missing = CrewAttendance::unassignedCrew($p);
-                must(!$missing, 'Enforce cannot be turned on yet: ' . count($missing) . ' active driver(s)/helper(s) have no assigned shift ('
-                    . implode(', ', array_map(fn($r) => $r['full_name'], array_slice($missing, 0, 10))) . (count($missing) > 10 ? ', ...' : '')
-                    . '). Assign their shift in the Drivers & Helpers masterlist first.', 409);
-            }
-            if (isset($shiftKeys[$key])) {
-                Settings::clearCache();
-                must((int)$raw !== (int)Settings::value($shiftKeys[$key]), 'The Day and Night shift start hours cannot be the same.', 409);
-            }
+        return transaction(function (PDO $p) use ($u, $key, $raw, $label, $hourKeys) {
             $previousSetting = one($p, 'SELECT setting_value FROM app_settings WHERE setting_key=?', [$key]);
             $p->prepare('INSERT INTO app_settings (setting_key, setting_value, updated_by) VALUES (?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value), updated_by=VALUES(updated_by)')
               ->execute([$key, $raw, $u['id']]);
             Settings::clearCache();
-            // Shift start hours are shown as 12-hour times (stored value stays 0-23).
-            $show = fn($v) => $v === null || $v === '' ? $v : (isset($shiftKeys[$key]) ? CrewAttendance::hourLabel((int)$v)
+            // The reminder hour is shown as 12-hour times (stored value stays 0-23).
+            $show = fn($v) => $v === null || $v === '' ? $v : (isset($hourKeys[$key]) ? CrewAttendance::hourLabel((int)$v)
                 : ($key === 'crew_attendance_dispatch_check' ? CrewAttendance::modeName((int)$v) : $v));
             auditWithChanges($p, $u['id'], 'Settings', $key, 'setting changed', "$label = " . $show($raw),
-                // A shift start hour never saved before was using its default: show that time as "before".
-                [$label => $show($previousSetting['setting_value'] ?? (isset($shiftKeys[$key]) || $key === 'crew_attendance_dispatch_check' ? (string)(int)Settings::default($key) : null))], [$label => $show($raw)]);
+                // A reminder hour never saved before was using its default: show that time as "before".
+                [$label => $show($previousSetting['setting_value'] ?? (isset($hourKeys[$key]) || $key === 'crew_attendance_dispatch_check' ? (string)(int)Settings::default($key) : null))], [$label => $show($raw)]);
             return ['message' => "$label saved (" . $show($raw) . "). New records use the new value."];
         });
     }

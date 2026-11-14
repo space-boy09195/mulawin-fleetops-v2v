@@ -84,7 +84,8 @@ final class FleetState {
         must((bool)$v, 'Truck not found.', 404);
         $trip = self::activeTrip($p, $vehicleId);
         $job = one($p, "SELECT id FROM maintenance_jobs WHERE vehicle_id=? AND open_key=1
-                        AND NOT (source='Incident' AND (severity IS NULL OR severity='Minor')) LIMIT 1", [$vehicleId]);
+                        AND NOT (source='Incident' AND (severity IS NULL OR severity='Minor')
+                                 AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.id=maintenance_jobs.incident_id AND i.clearance='Not Fit to Continue')) LIMIT 1", [$vehicleId]);
         if ($job) $next = 'Under Maintenance';
         elseif ($trip && in_array($trip['status'], self::AWAY, true)) $next = 'On Trip';
         elseif ($trip) $next = 'Assigned';
