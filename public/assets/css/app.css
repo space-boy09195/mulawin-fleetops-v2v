@@ -2429,3 +2429,125 @@ body:is(.operations-head,.dispatcher-role) .fleet-data-table[data-standard-table
 }
 @media(max-width:400px) { .metric-strip.metric-strip-icons { grid-template-columns:1fr; } }
 /* KPI ICON CARDS V1 END */
+
+
+/* Shared executive role sidebar: green icon rail and flyout (Admin + Operations Head). */
+.app-shell.executive-sidebar{--sidebar-w:260px}
+.app-shell.executive-sidebar .sidebar{
+  width:var(--sidebar-w);background:linear-gradient(175deg,#176238,#207444);
+  border-right:1px solid #1d6b3a;transition:width .2s ease,transform .2s ease;
+  overflow:visible
+}
+.app-shell.executive-sidebar .main{margin-left:var(--sidebar-w);transition:margin-left .2s ease}
+.app-shell.executive-sidebar .sidebar-top{
+  display:flex;align-items:center;gap:8px;min-height:68px;padding:12px 12px 12px 15px;
+  border-bottom:1px solid rgba(255,255,255,.18)
+}
+.app-shell.executive-sidebar .sidebar-brand{
+  flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:0;border:0
+}
+.app-shell.executive-sidebar .sidebar-brand .brand-text{min-width:0;overflow:hidden}
+.app-shell.executive-sidebar .sb-collapse{
+  flex:0 0 32px;width:32px;height:32px;display:grid;place-items:center;
+  border:1px solid rgba(255,255,255,.26);border-radius:8px;
+  background:rgba(255,255,255,.08);color:#f5fff7;cursor:pointer
+}
+.app-shell.executive-sidebar .sb-collapse:hover{background:rgba(255,255,255,.19)}
+.app-shell.executive-sidebar .sb-collapse:focus-visible,
+.app-shell.executive-sidebar .head-nav-group>summary:focus-visible{
+  outline:2px solid #d2f2d6;outline-offset:2px
+}
+.app-shell.executive-sidebar .sidebar-nav{padding:10px 9px 20px;overflow-y:auto;overflow-x:hidden}
+.app-shell.executive-sidebar .head-nav-group{margin:3px 0 7px;position:relative}
+.app-shell.executive-sidebar .head-nav-group>summary{
+  display:flex;align-items:center;gap:12px;min-height:42px;
+  padding:10px 12px;border-radius:9px;list-style:none;cursor:pointer;
+  color:#e8f5eb;font-weight:650;font-size:12.5px;white-space:nowrap
+}
+.app-shell.executive-sidebar .head-nav-group>summary::-webkit-details-marker{display:none}
+.app-shell.executive-sidebar .head-nav-group>summary>i:first-child{
+  flex:0 0 20px;text-align:center;font-size:17px
+}
+.app-shell.executive-sidebar .head-nav-group>summary .head-nav-chevron{
+  margin-left:auto;font-size:11px;transition:transform .18s ease
+}
+.app-shell.executive-sidebar .head-nav-group[open]>summary .head-nav-chevron{transform:rotate(180deg)}
+.app-shell.executive-sidebar .head-nav-group>summary:hover,
+.app-shell.executive-sidebar .head-nav-group[open]>summary{
+  background:rgba(255,255,255,.12);color:#fff
+}
+.app-shell.executive-sidebar .head-nav-items{padding:4px 0 3px 12px}
+.app-shell.executive-sidebar .head-nav-items .nav-item-link{
+  min-height:38px;padding:9px 10px;margin:2px 0;border-radius:8px;
+  display:flex;align-items:center;gap:11px;font-size:12px
+}
+.app-shell.executive-sidebar .head-nav-items .nav-item-link>i{width:19px;flex:none;text-align:center}
+.app-shell.executive-sidebar .head-nav-items .nav-item-link.active{
+  background:#e3f4e2;color:#175a32
+}
+.app-shell.executive-sidebar .sidebar-foot{white-space:normal}
+.executive-sidebar-flyout{
+  position:fixed;z-index:1300;width:242px;max-height:calc(100vh - 18px);
+  overflow-y:auto;padding:8px;background:#fff;
+  border:1px solid #d5e5da;border-radius:12px;
+  box-shadow:0 16px 40px rgba(16,57,31,.21)
+}
+.executive-sidebar-flyout-heading{
+  padding:9px 10px 10px;color:#315c40;font-size:11px;
+  text-transform:uppercase;letter-spacing:.07em;font-weight:800
+}
+.executive-sidebar-flyout-links{display:flex;flex-direction:column;gap:3px}
+.executive-sidebar-flyout .nav-item-link{
+  display:flex;align-items:center;gap:11px;min-height:37px;
+  padding:9px 10px;border-radius:8px;text-decoration:none;
+  font-size:12px;font-weight:600;color:#32523d
+}
+.executive-sidebar-flyout .nav-item-link>i{font-size:15px;width:20px;text-align:center}
+.executive-sidebar-flyout .nav-item-link:hover,
+.executive-sidebar-flyout .nav-item-link:focus-visible{background:#edf7ef;color:#14633a}
+.executive-sidebar-flyout .nav-item-link.active{
+  background:#e0f2e3;color:#156238;border-left:3px solid #24864e
+}
+@media(min-width:992px){
+  .app-shell.executive-sidebar.sb-collapsed{--sidebar-w:76px}
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-top{
+    flex-direction:column;gap:8px;padding:12px 7px
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-brand{
+    flex:none;justify-content:center;padding:0
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-brand .brand-text,
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-foot,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group>summary span,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-chevron,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-items{
+    display:none!important
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav{padding:11px 8px}
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group{margin:3px 0 9px}
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group>summary{
+    display:flex;justify-content:center;min-height:46px;padding:12px 7px;
+    background:transparent
+  }
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group>summary>i:first-child{
+    flex:0 0 auto;font-size:20px
+  }
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group>summary:hover,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group[open]>summary{
+    background:rgba(255,255,255,.17)
+  }
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group:has(.nav-item-link.active)>summary{
+    color:#145d36;background:#e1f4df;box-shadow:inset 3px 0 #73cb82
+  }
+}
+@media(max-width:991.98px){
+  .app-shell.executive-sidebar{--sidebar-w:260px}
+  .app-shell.executive-sidebar .main{margin-left:0}
+  .app-shell.executive-sidebar .sidebar{width:260px}
+  .app-shell.executive-sidebar .sidebar-top .sb-desktop{display:none}
+  .executive-sidebar-flyout{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .app-shell.executive-sidebar .sidebar,.app-shell.executive-sidebar .main,
+  .app-shell.executive-sidebar .head-nav-chevron{transition:none}
+}
