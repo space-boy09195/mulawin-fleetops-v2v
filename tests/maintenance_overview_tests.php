@@ -102,7 +102,7 @@ $nav = array_column(Access::navFor($mp), null, 'id');
 ok(($nav['maintenance_overview']['label'] ?? '') === 'Overview' && ($nav['maintenance']['label'] ?? '') === 'Repair Management' && !isset($nav['purchasing']), 'motorpool labels: Overview, Repair Management; no Parts & Purchasing page', json_encode(array_map(fn($n) => $n['label'], $nav)));
 ok(($nav['maintenance_overview']['section'] ?? '') === 'Maintenance', 'overview is in the Maintenance section for motorpool');
 $navAdm = array_column(Access::navFor($adm), null, 'id');
-ok(($navAdm['maintenance']['label'] ?? '') === 'Corrective Maintenance', 'other roles keep their Corrective Maintenance label');
+ok(($navAdm['maintenance']['label'] ?? '') === 'Maintenance Monitoring', 'Head Management keeps its approved Maintenance Monitoring label');
 ok(!isset(array_column(Access::navFor($pur), null, 'id')['maintenance_overview']), 'purchasing menu has no overview');
 // Direct calls of motorpool to purchasing-only actions are still refused.
 fails(fn() => Purchasing::action($mp, 'request_process', ['request_id' => 1]), 'motorpool cannot release parts (Purchasing only)', 403);

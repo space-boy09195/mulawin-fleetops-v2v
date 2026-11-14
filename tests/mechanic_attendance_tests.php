@@ -71,7 +71,7 @@ ok(one($p, 'SELECT shift FROM users WHERE id=?', [$other2['id']])['shift'] === n
 Admin::action($adm, 'user_save', ['id' => $other['id'], 'username' => 'finance2', 'full_name' => 'FINANCE TWO EDITED', 'email' => 'f2@example.test', 'role' => 'finance']);
 ok(one($p, 'SELECT full_name, shift FROM users WHERE id=?', [$other['id']]) === ['full_name' => 'FINANCE TWO EDITED', 'shift' => null], 'non-dispatcher account can be edited without a shift');
 $js = (string)file_get_contents(dirname(__DIR__) . '/public/assets/js/modules/administration/admin.js');
-ok(str_contains($js, 'dispatcherRoles.includes(role)') && str_contains($js, "['Division / shift', 'shift'"), 'dispatcher shift UI is still in admin.js');
+ok(str_contains($js, 'dispatcherRoles.includes(role)') && str_contains($js, "['Shift','shift']"), 'dispatcher shift UI is still in the approved account workspace');
 
 // ---------------------------------------------------------------------
 section('B. Mechanic masterlist without a shift');

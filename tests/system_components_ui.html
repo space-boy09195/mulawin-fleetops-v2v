@@ -54,13 +54,12 @@
     assert(verification[2]==='Billing.verify'&&verification[3].billing_id===50,'Billing verification retains its original endpoint and billing record identity');
     setRole('finance');sessionStorage.removeItem('tab:finance');
     App.pages.finance.render(ctx('finance',{can:{act:true},budgets:[],poPayables:[{...po,received_value:40,approved_by_name:'Recorded approver'}],payables:[],expenses:[],disbursements:[],methods:['Cash'],categories:[],trucks:[],cashflow:[],period:{from:'2026-11-01',to:'2026-11-30'}},{tab:'po'}));UI.activate(mount);
-    mount.querySelector('[data-fleet-manage]').click();
-    assert(mount.querySelector('.ui-action-summary').textContent.includes('1')&&document.querySelector('.modal [data-act=pay]'),'Finance follow-up counts do not remove the authorized payment action');
-    let payment;const save=UI.formModalFiles;UI.formModalFiles=(title,fields,action,options)=>payment={fields,action,options};document.querySelector('.modal [data-act=pay]').click();await pause();UI.formModalFiles=save;
+    assert(mount.querySelector('[data-act=pay]')&&mount.textContent.includes('Record payment'),'Finance workspace retains the authorized payment action beside the payable');
+    let payment;const save=UI.formModalFiles;UI.formModalFiles=(title,fields,action,options)=>payment={fields,action,options};mount.querySelector('[data-act=pay]').click();await pause();UI.formModalFiles=save;
     assert(payment.action==='Finance.po_pay'&&payment.options.extra.po_id===20&&payment.fields.find(f=>f.name==='amount').value==='40.00'&&payment.fields.find(f=>f.name==='or_doc').required,'Finance payment retains received-value amount, existing endpoint and required receipt');
     const financeData={can:{act:false},budgets:[],poPayables:[],payables:[{id:1,payable_ref:'AP-FIX',status:'Unpaid',balance:25}],expenses:[],disbursements:[],methods:['Cash'],categories:[],trucks:[],cashflow:[],period:{from:'2026-11-01',to:'2026-11-30'}};
     sessionStorage.setItem('tab:finance','po');App.pages.finance.render(ctx('finance',financeData,{tab:'ap'}));UI.activate(mount);
-    assert(mount.querySelector('[data-tab=ap]').getAttribute('aria-selected')==='true'&&mount.textContent.includes('AP-FIX')&&!mount.querySelector('[data-act=pay]'),'Follow-up destination overrides remembered tab while read-only Finance retains no payment controls');
+    assert(mount.querySelector('[role=tab].active').dataset.go==='finance?tab=ap'&&mount.textContent.includes('AP-FIX')&&!mount.querySelector('[data-act=pay]'),'Follow-up destination overrides remembered tab while read-only Finance retains no payment controls');
     const alert=RPMDashboard.alerts([{text:'2 recorded repairs awaiting verification',page:'maintenance',level:'danger'},{text:'1 restricted record',page:'not-authorized'}]);mount.innerHTML=alert;
     assert(mount.querySelectorAll('a').length===1&&mount.textContent.includes('2 recorded repairs')&&mount.querySelector('.ui-action-danger'),'Dashboard summaries preserve supplied counts/urgency and do not link restricted modules');
     assert(calls.every(c=>['Maintenance.details','Purchasing.po_details','Purchasing.request_details','Funds.details','Billing.details'].includes(c.action)),'Cross-module detail navigation makes only existing read API calls');

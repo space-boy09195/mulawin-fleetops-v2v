@@ -175,6 +175,7 @@ const MaintUI = {
       ${UI.h('Status history')}${UI.activity(r.events)}
       ${UI.h('Maintenance history of this truck')}${UI.table([['Record', 'job_ref'], ['Source', 'source'], ['Problem', 'problem'], ['Mechanic', 'mechanic'], ['Status', 'status', 'badge'], ['Date reported', 'reported_on', 'date'], ['Completed', 'completed_on', 'date']], r.history, { plain: true })}`;
     const el = UI.drawer(UI.esc(j.job_ref) + ' · ' + UI.esc(j.plate_number), html, { subtitle: 'Corrective maintenance · ' + UI.esc(j.verified_at ? 'Returned to service' : j.status) });
+    UI.drawerSections(el,[['overview','Overview',['Problem','Trip incident']],['repair','Inspection & Repairs',['Mechanics and repair']],['parts','Parts & Costs',['Parts and costs']],['docs','Documents',['Photos and documents']],['history','Status History',['Status history','Maintenance history of this truck']]],{key:'maintenance-details'});
     el.querySelector('[data-partspage]')?.addEventListener('click', (e) => { UI.closeDrawer(); App.go('mp_parts_requests', { vehicle_id: e.currentTarget.dataset.partspage }); });
     const reopen = () => { MaintUI.open(j.id); App.route(); };
     el.querySelectorAll('[data-rmh]').forEach(b => b.onclick = () => UI.confirmAction('Remove ' + UI.esc(b.dataset.name) + ' from ' + UI.esc(j.job_ref),

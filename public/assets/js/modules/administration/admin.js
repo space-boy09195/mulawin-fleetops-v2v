@@ -109,7 +109,8 @@ const HeadAdminPage = {
           +'<label class="record-workspace-sort-option"><input type="radio" name="'+sortId+'" value="desc" data-record-sort> Name Z–A</label></div></div>';
         const columns=[['Name','full_name'],['Username','username'],['Email','email'],
           ['Role','role',v=>UI.esc(d.roles[v]||v)],['Shift','shift'],
-          ['Status','active',v=>Number(v)?UI.badge('Active'):UI.badge('Inactive')],
+          ['Status','active',(v,u)=>(Number(v)?UI.badge('Active'):UI.badge('Inactive'))
+            +(Number(u.must_change_password)?'<div class="cell-sub">Must change password</div>':'')],
           ['E-signature','has_signature','yes'],['Last login','last_login_at','datetime']];
         const h=UI.table(columns,accounts,{
           title:'User Accounts',tools:toolbar,showAllColumns:true,viewSwitch:false,
