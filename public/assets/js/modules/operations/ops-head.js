@@ -1016,9 +1016,8 @@ const OpsHead = {
         +'<i class="bi bi-chevron-down head-nav-chevron" aria-hidden="true"></i></summary>'
         +'<div class="head-nav-items">'+entries.join('')+'</div></details>';
     }).join('');
-    const toggle = document.createElement('button'); toggle.className = 'icon-btn oh-collapse-nav'; toggle.type = 'button'; toggle.setAttribute('aria-label', 'Collapse navigation'); toggle.setAttribute('aria-expanded', 'true'); toggle.innerHTML = '<i class="bi bi-layout-sidebar-inset" aria-hidden="true"></i>';
-    toggle.onclick = () => { const collapsed = document.body.classList.toggle('oh-nav-collapsed'); toggle.setAttribute('aria-expanded', String(!collapsed)); toggle.setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation'); };
-    document.querySelector('.topbar').prepend(toggle);
+    // Collapse and flyout behavior is owned by the shared executive sidebar
+    // controller in core.js; do not restore the old hide-entire-sidebar toggle.
   };
   const drawer = UI.drawer;
   UI.drawer = (...args) => {
