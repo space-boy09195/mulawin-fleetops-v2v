@@ -896,7 +896,7 @@ const OpsHead = {
         dispatcher.onchange = dispatcher.oninput = () => { e.data.dispatcher_assignment = dispatcher.value;dispatcher.classList.remove('is-invalid');dispatcher.removeAttribute('aria-invalid');dispatcherError.hidden = true;dispatcherError.style.display='';fillAccounts();update(); };
         fillDispatchers();
         const fillRoutes = () => {
-          pick.innerHTML = '<option value="">Choose an approved route</option>' + e.routes.map(r => `<option value="${+r.id}">${UI.esc(r.route_ref)}</option>`).join('');
+          pick.innerHTML = '<option value="">Choose an approved route</option>' + e.routes.map(r => `<option value="${+r.id}">${UI.esc(r.route_ref)} — ${UI.esc(r.truck_type || 'Truck type unavailable')}</option>`).join('');
           pick.value = e.data.client_route_id || ''; pick.disabled = e.loading || !e.data.client_id;
           refreshRoutePicker();
           const routeInfo = card.querySelector('[data-approved-rate]');
