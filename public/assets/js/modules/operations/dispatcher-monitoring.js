@@ -26,10 +26,10 @@ const DispatcherMonitorUI = {
     const compatible=(status,tab)=>!status||(tab==='history'?terminal.includes(status):status!=='Pending Review'&&!terminal.includes(status));
     const statuses=(d.statuses||[]).filter(status=>compatible(status,d.tab));
     // `page` selects the authorized API screen; monitoring pagination uses its own key.
-    const href=next=>{const values={...q,tab:d.tab,...next,trip_page:1};if(!compatible(values.status,values.tab))delete values.status;return OpsHead.link('dispatcher-monitoring',values);};
+    const href=next=>{const values={...q,tab:d.tab,...next,trip_page:1};if(!compatible(values.status,values.tab))delete values.status;for(const key of Object.keys(values))if(values[key]==null||values[key]==='')delete values[key];return OpsHead.link('dispatcher-monitoring',values);};
     const roleOptions=[...new Map(groups.map(g=>[g.role,g.label.split(' - ')[0]])).entries()];
 
-    const groupCards=groups.map((g,i)=>'<a class="oh-dispatch-shift-card" href="'+UI.esc(href({group:g.role,shift:g.shift||'legacy'}))+'"><div class="oh-dispatch-shift-head"><b>'+UI.esc(g.label||('Dispatcher group '+(i+1)))+'</b><span>'+UI.esc(g.shift||'Legacy')+'</span></div><div class="oh-dispatch-shift-stats"><span>Active <b>'+UI.num(g.active)+'</b></span><span>Completed <b>'+UI.num(g.completed)+'</b></span></div></a>').join('');
+    const groupCards=groups.map((g,i)=>'<a class="oh-dispatch-shift-card" '+(q.group===g.role&&q.shift===(g.shift||'legacy')?'aria-current="page" ':'')+'href="'+UI.esc(href({group:g.role,shift:g.shift||'legacy'}))+'"><div class="oh-dispatch-shift-head"><b>'+UI.esc(g.label||('Dispatcher group '+(i+1)))+'</b><span>'+UI.esc(g.shift||'Legacy')+'</span></div><div class="oh-dispatch-shift-stats"><span>Active <b>'+UI.num(g.active)+'</b></span><span>Completed <b>'+UI.num(g.completed)+'</b></span></div></a>').join('');
     const option=(value,label,current)=>'<option value="'+UI.esc(value)+'"'+(String(value)===String(current||'')?' selected':'')+'>'+UI.esc(label)+'</option>';
     const statusOptions=statuses.map(v=>option(v,v,q.status)).join('');
     const controls='<button type="button" class="btn btn-sm btn-outline-secondary record-workspace-filter-trigger" aria-controls="monitor-filter-panel" aria-expanded="false"><i class="bi bi-funnel"></i> Filter</button>'
@@ -53,13 +53,18 @@ const DispatcherMonitorUI = {
     ctx.el.innerHTML='<div class="oh-dispatch-workspace">'+metrics
       +'<section class="oh-dispatch-shifts"><div class="oh-dispatch-section-head"><h2>Dispatcher Shift Overview</h2><span>'+UI.num(groups.length)+' groups / shifts</span></div><div class="oh-dispatch-shift-grid">'+(groupCards||'<p class="small text-muted">No dispatcher groups configured.</p>')+'</div></section>'
       +RecordComponents.tabs([{value:'active',label:'Active Trips'},{value:'history',label:'Trip History'}],d.tab,'data-monitor-view')
+      +(q.group||q.shift?'<p class="small"><a data-clear-group href="'+UI.esc(href({group:undefined,shift:undefined}))+'">Clear Group</a></p>':'')
       +'<section class="record-workspace-panel oh-dispatch-records"><div class="record-workspace-heading"><div><h2>'+(history?'Trip History Records':'Active Trip Records')+'</h2><p class="record-workspace-count">'+UI.num(d.total)+' matching records</p></div>'
       +'</div><div class="record-workspace-search"><input data-monitor-search aria-label="Search monitored trips" class="form-control" type="search" value="'+UI.esc(q.search||'')+'" placeholder="Search trip, client, route or truck">'+controls+'</div>'
       +'<div class="oh-dispatch-table-wrap"><table class="data-table"><thead><tr><th>Trip / Client</th><th>Route</th><th>Type / Truck</th><th>'+(history?'Completion / Closure':'Scheduled Dispatch')+'</th><th>Status</th><th>Action</th></tr></thead><tbody data-monitor-tbody>'
       +(originalRows.map(rowHTML).join('')||'<tr><td colspan="6" class="table-empty">No trips match these filters.</td></tr>')+'</tbody></table></div>'
       +'<div class="oh-dispatch-pager">'+UI.recordPager({total:d.total,page:d.page,pages:d.pages,pageSize:d.pageSize||12,previous:'data-monitor-prev',next:'data-monitor-next'})+'</div></section></div>';
     const root=ctx.el.querySelector('.oh-dispatch-workspace');
-    root.querySelectorAll('[data-monitor-view]').forEach(button=>button.addEventListener('click',()=>App.go('dispatcher-monitoring',{tab:button.dataset.monitorView})));
+    root.querySelectorAll('[data-monitor-view]').forEach(button=>button.addEventListener('click',()=>{
+      const next={...q,tab:button.dataset.monitorView,trip_page:1};
+      if(!compatible(next.status,next.tab))delete next.status;
+      App.go('dispatcher-monitoring',next);
+    }));
     root.querySelector('[data-monitor-prev]')?.addEventListener('click',()=>App.go('dispatcher-monitoring',{...q,trip_page:d.page-1}));
     root.querySelector('[data-monitor-next]')?.addEventListener('click',()=>App.go('dispatcher-monitoring',{...q,trip_page:d.page+1}));
     root.querySelectorAll('[data-monitor-trip]').forEach(button=>button.addEventListener('click',()=>this.details(button.dataset.monitorTrip,groups)));

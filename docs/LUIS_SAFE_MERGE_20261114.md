@@ -1,6 +1,60 @@
 # Luis safe integration candidate — 2026-11-14
 
-## Verification follow-up — current status
+## Final blocker verification - 2026-11-14
+
+This section supersedes the historical blocker/status statements below. **The requested local regression gates now pass. Nothing was pushed and no PR was created.** Work remains on `integration/luis-safe-merge-20261114`, based on `219d886039e2eeea5238b4fd5f5e446123effd6e`. These follow-up changes are intentionally uncommitted under the repository's local-work rule; the commit SHA does not yet include them.
+
+### Classification and repairs
+
+The three original browser fixtures and their Operations renderers are identical between the starting candidate HEAD and untouched target `bb308e9` (`git diff integration/all-dev-20261114 HEAD -- <those files>` is empty). Their failures are baseline issues, not newly introduced Luis regressions.
+
+| Fixture | Finding | Resolution and final result |
+| --- | --- | --- |
+| `ops_head_ui.html` | Missing shared record/form scripts; obsolete inline planner, independently selected truck type, old table/filter selectors and KPI assumptions. | Load real dependencies and exercise the actual Add Trip modal. Approved route determines truck type; client-only selectable-route responses carry types. Preserve assertions for explicit dispatcher accounts/shifts, independent clients, five-trip expansion, shipment overrides, twenty-trip limit, no auto-allocation, duplicate-click protection, original idempotency keys, interrupted recovery and failed-row-only retry. Use current Trucks/Personnel controls and actual drawer associations. **97 PASS, 0 FAIL**. |
+| `dispatcher_monitoring_ui.html` | Missing dependencies and obsolete markup; also uncovered a real baseline application bug: Active/History tabs discarded committed group/shift/search/date filters. Selected group indication and Clear Group were missing. | Correct selectors while retaining request URL/permission/paging/date assertions. Fix the real renderer to retain compatible filters, reset `trip_page`, discard incompatible statuses, indicate the selected group and clear only group/shift. Remove empty/undefined query values before encoding links. **30 PASS, 0 FAIL**. |
+| `trip_approvals_ui.html` | Missing dependencies; expected flat sidebar, old monitoring fields and Personnel Add controls in the header. | Verify approved collapsible navigation, retired approval bookmark redirects, current read-only monitoring, trip-specific Helper reasons, and existing contextual Add Driver/Helper buttons in the record toolbar. No duplicate application controls added. **35 PASS, 0 FAIL**. |
+
+These were reproducible fixture/application-contract problems, not an unexplained browser environment timeout. No new merge-specific application regression was found in this pass. The prior supplementary Admin navigation regression was already corrected in the starting candidate and its real-registry browser checks still pass.
+
+### Contract rates and historical pending records
+
+`tests/route_tests.php` now tests normal Head Management rate entry as **immediately Approved and selectable**, with immediate transactional revision/supersession and rejection of an unnecessary second decision. Planning and billing snapshot tests use that workflow directly.
+
+Legacy decision/rejection, ownership, unique pending/current constraints, stale-client checks, client-row lock ordering, rollback and concurrent decisions remain tested. Their setup explicitly inserts historical Pending Approval rows into the guarded disposable test database, with historical events/notifications; it does not call today's rate-entry API and pretend that it leaves a pending rate. No production rate logic or permissions were changed. The remaining old pending-revision message expectation now asserts the actual explicit legacy-pending guard, still requiring HTTP 409.
+
+### Executed verification
+
+Commands were run from the candidate workspace; PHP used `C:\xampp\php\php.exe`.
+
+| Command/check | Actual final result |
+| --- | --- |
+| `php vendor/phpunit/phpunit/phpunit --do-not-cache-result` (configured default Safe suite) | **PASS: 483 tests, 1,997 assertions; zero warnings/failures.** Guarded DB suites are reported separately below. |
+| `node tests/run_ops_head_browser.cjs --fixtures-only` | **PASS: all 12 fixtures, 693 checks, zero failures.** Counts: turnover 21, standard tables 26, shared components 14, system components 20, Operations 24, routes 39, Operations Head 97, monitoring 30, retired approvals 35, Dispatcher 314, reports 33, analytics 40. |
+| Individual `--fixture=ops_head_ui.html`, `--fixture=dispatcher_monitoring_ui.html`, `--fixture=trip_approvals_ui.html` | **PASS: 97 / 30 / 35 checks**, including final reruns after fixture cleanup. |
+| `node tests/run_luis_review_browser.cjs` | **PASS: 333 checks**, real PHP authorization registry and actual browser modules with mocked page data; includes Admin supplementary routes and current Operations planning. |
+| `node tests/run_ops_head_browser.cjs --components-only` | **PASS: 60 checks plus 390/820/1366 viewport interactions without horizontal overflow.** Includes Maintenance, Purchasing, Billing, Finance, Audit and read-only role controls. |
+| `php tests/run_route_tests.php` | **PASS: 212 checks, zero failures**, including fresh/upgrade schema equivalence, partial-migration recovery, activation rollback, concurrent legacy decisions, fixed-rate planning and frozen billing snapshots. No skipped checks reported. |
+| `php tests/run_current_route_tests.php` | **PASS: 45 checks**, current immediate activation and safe historical decisions. |
+| `php tests/run_trip_batch_tests.php` | **PASS: 65 checks**, including explicit responsible Dispatcher and no automatic truck assignment. |
+| `php tests/run_dispatcher_tests.php` | **PASS: 49 checks**, session/shift scope, held resources, fixed pairs, two distinct Car Carrier Drivers and monitoring pagination/search. |
+| `php tests/run_operations_v43_tests.php` | **PASS: 89 checks**, manual planning/assignment, fixed pair integrity and isolated migration safeguards. |
+| PHP lint: `tests/route_tests.php`; Node syntax: `public/assets/js/modules/operations/dispatcher-monitoring.js` | **PASS.** Inline fixture scripts were executed successfully in Chrome. |
+
+The seven original PHPUnit failures and two warnings were previously reproduced on the untouched target (482 tests); their baseline classification and corrections remain documented below. They are not current failures. During this pass, the route suite initially failed because its new historical fixture seed omitted the required audit transaction; the seed was made transactional. A later run had 211 PASS/1 FAIL solely for the old pending-revision message. Both are corrected in the final 212/0 result. One batch run was interrupted by PowerShell treating an intentional rollback-test stderr message as a terminating native-command error; its complete rerun exited 0 with 65/0. Interrupted runs are not counted as passes.
+
+All service tests used the separately owned QA server at `127.0.0.1:33383`, after checking actual `@@datadir`, `@@port` and absence of `mulawin_v2`. The existing guarded launchers copied code into isolated test environments and verified database ownership before recreation/cleanup. The latest instructions allow disposable migration tests; **no operational migration or operational database connection was executed**. SQL SHUTDOWN stopped the verified QA listener. Two startup attempts were unavailable and were not counted as successful tests.
+
+### Final diff and risks
+
+Only six files change in this follow-up: the Monitoring renderer, the three browser fixtures, the legacy route suite and this report. No backend, schema, migration, business permission or departmental implementation changes. No new application files/functions were deleted or replaced. The full merge's sole deleted path is the historical `tests/crew_dispatch_tests.php`; `tests/README.md` identifies its replacement `run_dispatch_attendance_tests.php`, because automatic assignment/permanent crew shifts were retired. It is not a removed application feature. Both Luis branch tips remain ancestors of the candidate; existing maintenance, purchasing, departmental and accounting changes remain included. Their initial 1,214-check backend results are historical evidence, not claimed as rerun here; current component/role checks supplement them.
+
+Target local and remote-tracking references remain `bb308e984bc523905433f9d73630eeea346752a0`; `main` remains `657a76137fc7b1ccd6956f1ecd2dfdc653de5e16`. No staging, commit, push, merge, force operation or branch deletion was performed in this follow-up.
+
+**No remaining blocker in the requested local gates. Ready for review after these local changes are committed; no push/PR is authorized yet.** Remaining limits: browser APIs are mocked, so live authenticated behavior and the operational schema/data are not certified. The route migration suite reports seven pre-existing migration files that do not self-record in `schema_migrations`; schema equivalence/recovery passed, but this remains a deployment-history risk for a separately authorized rollout. This verification does not authorize operational migration or deployment.
+
+## Historical evidence from earlier passes
+
+## Earlier verification follow-up (historical)
 
 **The candidate remains local. No push or target merge was performed. The complete legacy regression gate is not yet cleared.** The initial merge report below is retained as historical evidence; this follow-up supersedes its PHPUnit, navigation, route-service and Operations-timeout findings.
 
