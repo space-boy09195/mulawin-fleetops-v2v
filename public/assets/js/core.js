@@ -347,13 +347,15 @@ const App = {
     const sideFoot = ws ? '' : `<div class="sidebar-foot">${UI.esc(u.role_label)}${u.shift ? ' · ' + UI.esc(u.shift) + ' shift' : ''}</div>`;
     document.body.classList.toggle('ws-body', !!ws);   // drawers and modals live outside #appShell
     document.body.classList.toggle('ref-body', !!(ws && ws.exclusive));   // REF_FIDELITY_V1: Motorpool / Purchasing drawers
+    const executiveSidebar = ['admin','operations_head'].includes(u.role);
+    const collapseKey = executiveSidebar ? 'executive-sidebar-collapsed-' + u.role : 'ws-sidebar-collapsed';
     let collapsed = false;
-    try { collapsed = !!ws && localStorage.getItem('ws-sidebar-collapsed') === '1'; } catch { /* storage unavailable */ }
+    try { collapsed = (!!ws || executiveSidebar) && localStorage.getItem(collapseKey) === '1'; } catch { /* storage unavailable */ }
     document.getElementById('app').innerHTML = `
-    <div class="app-shell${ws ? ' ws-app' : ''}${ws && ws.exclusive ? ' ref-app' : ''}${collapsed ? ' sb-collapsed' : ''}" id="appShell">
+    <div class="app-shell${ws ? ' ws-app' : ''}${executiveSidebar ? ' executive-sidebar' : ''}${ws && ws.exclusive ? ' ref-app' : ''}${collapsed ? ' sb-collapsed' : ''}" id="appShell">
       <aside class="sidebar" id="appSidebar" aria-label="Main menu">
         <div class="sidebar-top"><a href="#${this.homePage()}" class="sidebar-brand">${UI.logoTag('sidebar-logo')}<span class="brand-text"><span class="brand-product">${ws ? 'MULAWIN' : 'Mulawin FleetOps'}</span><span class="brand-company">${ws ? (ws.exclusive ? 'FleetOps' : 'FleetOps · ' + UI.esc(ws.dept)) : 'R.P. Mulawin Trucking'}</span></span></a>
-          ${ws ? `<button type="button" class="sb-collapse sb-desktop" id="sbCollapse" aria-label="${collapsed ? 'Expand' : 'Collapse'} the menu" title="${collapsed ? 'Expand' : 'Collapse'} the menu" aria-pressed="${collapsed}"><i class="bi bi-layout-sidebar-inset" aria-hidden="true"></i></button>
+          ${ws || executiveSidebar ? `<button type="button" class="sb-collapse sb-desktop" id="sbCollapse" aria-label="${collapsed ? 'Expand' : 'Collapse'} the menu" title="${collapsed ? 'Expand' : 'Collapse'} the menu" aria-pressed="${collapsed}"><i class="bi bi-layout-sidebar-inset" aria-hidden="true"></i></button>
             <button type="button" class="sb-collapse sb-mobile" id="sbClose" aria-label="Close the menu"><i class="bi bi-x-lg" aria-hidden="true"></i></button>` : ''}</div>
         <nav class="sidebar-nav">${nav}</nav>
         ${sideFoot}
@@ -406,9 +408,66 @@ const App = {
     document.getElementById('sbCollapse')?.addEventListener('click', (e) => {
       const shell = document.getElementById('appShell'), on = shell.classList.toggle('sb-collapsed'), b = e.currentTarget;
       b.setAttribute('aria-pressed', String(on)); b.title = (on ? 'Expand' : 'Collapse') + ' the menu'; b.setAttribute('aria-label', b.title);
-      try { localStorage.setItem('ws-sidebar-collapsed', on ? '1' : '0'); } catch { /* storage unavailable */ }
+      try { localStorage.setItem(collapseKey, on ? '1' : '0'); } catch { /* storage unavailable */ }
+      if (executiveSidebar) document.querySelector('.executive-sidebar-flyout')?.remove();
     });
+    this._executiveSidebarAbort?.abort();
+    this._executiveSidebarAbort = new AbortController();
     sb.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sb.classList.contains('open')) { bd.onclick(); document.getElementById('menuBtn')?.focus(); } });
+    // Shared collapsed group flyout for Head Management and Operations Head.
+    // Defer until the Operations-specific shell has finished rebuilding its menu.
+    if (executiveSidebar) queueMicrotask(() => {
+      if (document.getElementById('appSidebar') !== sb) return;
+      document.querySelector('.executive-sidebar-flyout')?.remove();
+      const nav = sb.querySelector('.sidebar-nav');
+      const closeFlyout = () => document.querySelector('.executive-sidebar-flyout')?.remove();
+      const openFlyout = (group, summary) => {
+        closeFlyout();
+        const flyout = document.createElement('div');
+        flyout.className = 'executive-sidebar-flyout';
+        flyout.setAttribute('role', 'navigation');
+        const label = summary.querySelector('span')?.textContent || 'Navigation';
+        flyout.setAttribute('aria-label', label);
+        const heading = document.createElement('div');
+        heading.className = 'executive-sidebar-flyout-heading';
+        heading.textContent = label;
+        const links = document.createElement('div');
+        links.className = 'executive-sidebar-flyout-links';
+        group.querySelectorAll('.head-nav-items a').forEach(link => {
+          const copy = link.cloneNode(true);
+          copy.removeAttribute('id');
+          copy.addEventListener('click', closeFlyout);
+          links.append(copy);
+        });
+        flyout.append(heading,links);
+        document.body.append(flyout);
+        const rect = summary.getBoundingClientRect();
+        const width = flyout.offsetWidth;
+        flyout.style.left = Math.min(rect.right + 9, window.innerWidth - width - 8) + 'px';
+        flyout.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - flyout.offsetHeight - 8)) + 'px';
+      };
+      nav.addEventListener('click', (event) => {
+        const summary = event.target.closest('.head-nav-group > summary');
+        if (summary && document.getElementById('appShell')?.classList.contains('sb-collapsed') && window.matchMedia('(min-width: 992px)').matches) {
+          event.preventDefault();
+          const group = summary.parentElement;
+          const existing = document.querySelector('.executive-sidebar-flyout');
+          const same = existing?.getAttribute('aria-label') === (summary.querySelector('span')?.textContent || 'Navigation');
+          if (same) closeFlyout(); else openFlyout(group, summary);
+          summary.setAttribute('aria-expanded', String(!same));
+          return;
+        }
+        if (event.target.closest('a')) closeFlyout();
+      });
+      document.addEventListener('pointerdown', (event) => {
+        if (!document.getElementById('appShell')?.classList.contains('executive-sidebar')) return;
+        if (!event.target.closest('.executive-sidebar-flyout, .head-nav-group > summary')) closeFlyout();
+      }, { signal: this._executiveSidebarAbort?.signal });
+      const escapeFlyout = (event) => { if(event.key === 'Escape') closeFlyout(); };
+      document.addEventListener('keydown', escapeFlyout, { signal: this._executiveSidebarAbort?.signal });
+      window.addEventListener('resize', closeFlyout, { signal: this._executiveSidebarAbort?.signal });
+      window.addEventListener('hashchange', closeFlyout, { signal: this._executiveSidebarAbort?.signal });
+    });
     document.getElementById('logoutBtn').onclick = () => UI.confirm('Log out', 'Log out of Mulawin FleetOps?', () => this.logout(), { submit: 'Log out' });
     document.getElementById('chgPw').onclick = () => this.passwordScreen();
     document.getElementById('chgEmail').onclick = () => this.emailScreen();
