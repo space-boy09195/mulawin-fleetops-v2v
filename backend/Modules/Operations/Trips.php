@@ -304,6 +304,7 @@ final class Trips {
             'dispatch' => self::dispatch($u, $d),
             'incident' => self::incident($u, $d),
             'resume' => self::resume($u, $d),
+            'incident_reschedule' => self::incidentReschedule($u, $d),
             'reschedule' => self::reschedule($u, $d),
             'progress' => self::progress($u,$d),
             'complete' => self::complete($u, $d),
@@ -724,6 +725,10 @@ final class Trips {
             must((bool)$pre, 'Trip not found.', 404);
             must(!in_array($pre['status'], self::CLOSED, true), 'The trip is already closed.', 409);
             self::mustBeStatus($pre, ['Awaiting Resources', 'Pre-Assigned', 'Ready for Dispatch', 'For Reschedule'], 'edit the delivery details');
+            // An approved route, required at planning (create), is not dropped by an edit that does not send it;
+            // removing it on purpose is refused like a new trip without a route. Legacy trips without a route are unchanged.
+            if (!array_key_exists('client_route_id', $d) && $pre['client_route_id']) $d['client_route_id'] = (string)$pre['client_route_id'];
+            must(!$pre['client_route_id'] || trim((string)$d['client_route_id']) !== '', 'Choose an approved client route for the trip; it cannot be removed.');
             $prepared = self::distanceColumns($u, $d, self::deliveryFields($d, false, (string)$pre['scheduled_at']), (int)$pre['client_id'], $pre['truck_type'], $pre);
             must($prepared[0]['distance_km'] !== null && $prepared[0]['distance_km'] > 0, 'Enter the billable distance in km (pickup point to delivery point).');
         }
@@ -818,8 +823,7 @@ final class Trips {
         $p = db();
         $t = one($p, 'SELECT * FROM trips WHERE id=?', [idField($d, 'trip_id')]);
         must((bool)$t, 'Trip not found.', 404);
-        $plan = CrewAttendance::planningShift($t);
-        $enforce = CrewAttendance::mode() === CrewAttendance::MODE_ENFORCE;
+        $plan = CrewAttendance::planningDay($t);
         $out = [];
         foreach (many($p, "SELECT id FROM personnel WHERE active=1 AND person_type IN ('Driver','Helper') ORDER BY person_type, full_name") as $r) {
             $id = (int)$r['id'];
@@ -828,12 +832,11 @@ final class Trips {
             $current = in_array($id, array_map('intval', [$t['driver_id'], $t['driver2_id'], $t['helper_id']]), true);
             $labels = [];
             if ($c['absent']) $labels[] = 'Absent';
-            if ($c['issue']) $labels[] = $c['issue'];
             if ($block) $labels[] = 'Not available';
-            $out[] = ['id' => $id, 'name' => $c['name'], 'type' => $c['type'], 'duty_shift' => $c['duty_shift'], 'attendance' => $c['attendance'], 'current' => $current,
-                      'labels' => $labels, 'blocker' => $block, 'allowed' => !$c['absent'] && !$block && (!$enforce || !$c['issue'])];
+            $out[] = ['id' => $id, 'name' => $c['name'], 'type' => $c['type'], 'attendance' => $c['attendance'], 'current' => $current,
+                      'labels' => $labels, 'blocker' => $block, 'allowed' => !$c['absent'] && !$block];
         }
-        return ['mode' => CrewAttendance::modeName(), 'shift' => $plan['shift'], 'shift_text' => CrewAttendance::shiftText($plan), 'crew' => $out];
+        return ['mode' => CrewAttendance::modeName(), 'day_text' => CrewAttendance::dayText($plan), 'crew' => $out];
     }
 
     private static function dispatcherResources(array $u,array $d): array {
@@ -1039,13 +1042,43 @@ final class Trips {
             self::mustBeTripDispatcher($u, $t);
             self::mustBeStatus($t, ['On Hold - Incident Reported'], 'resume the trip');
             $inc = one($p, 'SELECT * FROM incidents WHERE trip_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$id]);
-            must($inc && $inc['status'] === 'Repaired - Cleared to Continue', 'Wait for Maintenance to confirm the repair (Repaired - Cleared to Continue).', 409);
-            run($p, "UPDATE incidents SET status='Resolved', resolved_at=NOW() WHERE id=?", [$inc['id']]);
+            // INCIDENT_CLEARANCE_V1: only Motorpool's recorded Fit to Continue for the trip's CURRENT incident, attempt and truck.
+            must($inc && $inc['status'] === 'Repaired - Cleared to Continue' && $inc['clearance'] === 'Fit to Continue',
+                'Wait for Motorpool to record Fit to Continue for the current incident.', 409);
+            must((int)$inc['attempt_number'] === (int)$t['attempt_number'] && (int)$inc['vehicle_id'] === (int)$t['vehicle_id'],
+                'The recorded clearance is for another attempt or truck of this trip.', 409);
+            run($p, "UPDATE incidents SET status='Resolved', resolved_at=NOW(), resumed_by=?, resumed_at=NOW() WHERE id=?", [$u['id'], $inc['id']]);
             self::setStatus($p, $u['id'], $t, 'In Transit', 'trip resumed after minor repair', 'Continuation of the original trip (not a second attempt).');
             FleetState::reconcile($p, (int)$t['vehicle_id'], $u['id'], 'Resumed ' . $t['trip_ref']);
             Notify::roles($p, ['operations_head'], 'Trip resumed', $t['trip_ref'] . ' resumed after a minor repair.', 'trips');
             Notify::resolve($p, 'trip-resume-' . $inc['id']);
             return ['message' => 'Trip resumed. Status: In Transit.'];
+        });
+    }
+
+    /**
+     * INCIDENT_CLEARANCE_V1: Operations Head authorizes For Reschedule when Motorpool recorded Not Fit to Continue on the
+     * trip's CURRENT Minor incident. The Minor classification and incident history stay; the repair continues and the
+     * truck shows Under Maintenance (FleetState). The responsible Dispatcher reschedules after the verified repair
+     * (existing reschedule step), or selects another eligible fixed pair.
+     */
+    private static function incidentReschedule(array $u, array $d): array {
+        requireRole($u, 'operations_head');
+        $id = idField($d, 'trip_id');
+        $reason = field($d, 'reason', 300);
+        return transaction(function (PDO $p) use ($u, $id, $reason) {
+            $t = self::lockTrip($p, $id);
+            self::mustBeStatus($t, ['On Hold - Incident Reported'], 'move the trip to For Reschedule');
+            $inc = one($p, 'SELECT * FROM incidents WHERE trip_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$id]);
+            must($inc && (int)$inc['attempt_number'] === (int)$t['attempt_number'] && (int)$inc['vehicle_id'] === (int)$t['vehicle_id'], 'The trip has no current incident for this attempt and truck.', 409);
+            must($inc['severity'] === 'Minor' && $inc['clearance'] === 'Not Fit to Continue',
+                'For Reschedule from On Hold needs Motorpool\'s Not Fit to Continue on the current Minor incident (Major damage is rescheduled by the assessment).', 409);
+            self::setStatus($p, $u['id'], $t, 'For Reschedule', 'not fit to continue: rescheduling authorized by the Operations Head',
+                $inc['incident_ref'] . ' (Minor, Not Fit to Continue): ' . $reason);
+            $now = FleetState::reconcile($p, (int)$t['vehicle_id'], $u['id'], 'Not fit to continue ' . $inc['incident_ref']);
+            audit($p, $u['id'], 'Trips', 'trip ' . $id, 'for reschedule after not fit', $t['trip_ref'] . ' / ' . $inc['incident_ref'] . ': ' . $reason);
+            Notify::tripRoles($p, $t, [$t['dispatcher_role']], 'Trip for reschedule', $t['trip_ref'] . ' is For Reschedule (truck not fit to continue, ' . $inc['incident_ref'] . '). Reschedule after the repair is verified, or select another eligible fixed pair.', 'trips', 'trip-reschedule-' . $inc['id']);
+            return ['message' => $t['trip_ref'] . ' is For Reschedule. Truck is ' . $now . '; the Minor classification and incident history are kept.'];
         });
     }
 
@@ -1287,7 +1320,7 @@ final class Trips {
             FROM fund_requests f JOIN users ru ON ru.id=f.requested_by LEFT JOIN users au ON au.id=f.approved_by LEFT JOIN users lu ON lu.id=f.released_by WHERE f.trip_id=? ORDER BY f.id', [$id]);
         foreach ($funds as &$f) $f['lines'] = many($p, 'SELECT category_name, amount, is_preset FROM fund_request_lines WHERE fund_request_id=? ORDER BY id', [$f['id']]);
         unset($f);
-        $incidents = many($p, 'SELECT i.*, ru.full_name AS reported_by_name, au.full_name AS assessed_by_name, m.job_ref, m.status AS job_status FROM incidents i JOIN users ru ON ru.id=i.reported_by LEFT JOIN users au ON au.id=i.assessed_by LEFT JOIN maintenance_jobs m ON m.incident_id=i.id WHERE i.trip_id=? ORDER BY i.id', [$id]);
+        $incidents = many($p, 'SELECT i.*, ru.full_name AS reported_by_name, au.full_name AS assessed_by_name, cu.full_name AS cleared_by_name, su.full_name AS resumed_by_name, m.job_ref, m.status AS job_status FROM incidents i JOIN users ru ON ru.id=i.reported_by LEFT JOIN users au ON au.id=i.assessed_by LEFT JOIN users cu ON cu.id=i.cleared_by LEFT JOIN users su ON su.id=i.resumed_by LEFT JOIN maintenance_jobs m ON m.incident_id=i.id WHERE i.trip_id=? ORDER BY i.id', [$id]);
         $docs = Files::of($p, 'trip', $id);
         foreach ($incidents as $i) foreach (Files::of($p, 'incident', (int)$i['id']) as $doc) $docs[] = $doc + ['for' => $i['incident_ref']];
         return [

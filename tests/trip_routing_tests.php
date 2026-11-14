@@ -113,8 +113,13 @@ $mkRoute = function (int $client, string $type, array $o = [], string $routeStat
 };
 $when = fn(int $h = 3) => date('Y-m-d\TH:i', time() + $h * 3600);
 $n = 0;
-$trip = function (array $o = []) use ($cid, $when, &$n, $TAN, $MAL): array {
+// kenneth planning: the Operations Head names the dispatcher group:shift and the responsible Dispatcher account.
+run($p, "UPDATE users SET shift='Day' WHERE role IN ('container_wingvan_dispatcher','car_carrier_dispatcher')");
+foreach (['container_wingvan_dispatcher', 'car_carrier_dispatcher'] as $dr) $users[$dr]['shift'] = 'Day';
+$trip = function (array $o = []) use ($cid, $when, &$n, $TAN, $MAL, $users): array {
     $n++;
+    $type = $o['truck_type'] ?? 'Wing Van'; $role = dispatcherRoleFor($type);
+    $o += ['dispatcher_assignment' => $role . ':Day', 'responsible_dispatcher_id' => $users[$role]['id']];
     return $o + ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "PICKUP $n", 'delivery_point' => "DELIVERY $n", 'scheduled_at' => $when(),
         'pickup_lat' => (string)$TAN[0], 'pickup_lng' => (string)$TAN[1], 'delivery_lat' => (string)$MAL[0], 'delivery_lng' => (string)$MAL[1]];
 };
@@ -125,76 +130,15 @@ $fmt = fn(float $x) => number_format($x, 2, '.', '');
 $COMP = $km('recommended');
 
 // ---------------------------------------------------------------------
-section('A. New trip (Scenario A): automatic road distance');
-$REQ = [];
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => $fmt($COMP)]));
-$t = $T($r['trip_id']);
-ok($t['distance_source'] === 'Map' && (float)$t['distance_km'] === $COMP && (float)$t['distance_computed_km'] === $COMP && $t['route_option'] === 'recommended'
-   && $t['distance_provider'] === 'openrouteservice/driving-hgv' && $t['distance_computed_at'] !== null && $t['distance_override_reason'] === null && $t['client_route_id'] === null,
-   'km = computed -> Map, computed km, option, provider and time saved', json_encode(array_intersect_key($t, array_flip(['distance_source', 'distance_km', 'distance_computed_km', 'route_option']))));
-ok($line($r['trip_id']) === 'triplineA', 'road line saved in trip_routes');
-ok(count($REQ) === 0, 'road distance served from the cache (no second call for the same points and option)', (string)count($REQ));
-ok($t['status'] === 'Pre-Assigned' && $t['vehicle_id'] !== null, 'trip is still auto-assigned (Pre-Assigned)', $t['status']);
-$ev = one($p, "SELECT notes FROM trip_events WHERE trip_id=? AND event_type LIKE 'trip created%'", [$r['trip_id']]);
-ok(str_contains((string)$ev['notes'], 'Distance: ' . number_format($COMP, 2) . ' km, Map') && str_contains((string)$ev['notes'], 'Recommended'), 'trip history shows the distance and its source', (string)$ev['notes']);
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'pickup_lat' => (string)$STR[0], 'pickup_lng' => (string)$STR[1]]));
-$t = $T($r['trip_id']);
-ok($t['distance_source'] === 'Map' && (float)$t['distance_km'] === $km('recommended', $STR), 'no km typed -> the computed km becomes the billable km', (string)$t['distance_km']);
-
-// ---------------------------------------------------------------------
-section('B. Route options');
-foreach (['avoid_tolls' => ['tollways'], 'general_roads' => ['highways', 'tollways']] as $opt => $avoid) {
-    $REQ = [];
-    $r = Trips::action($ops, 'create', $trip(['route_option' => $opt, 'pickup_lat' => '14.1000', 'pickup_lng' => '121.1400']));
-    $t = $T($r['trip_id']);
-    $sent = json_decode((string)($REQ[0]['body'] ?? ''), true);
-    ok(($sent['options']['avoid_features'] ?? null) === $avoid, "$opt -> request avoids " . json_encode($avoid));
-    ok($t['route_option'] === $opt && $t['distance_source'] === 'Map' && (float)$t['distance_km'] === $km($opt, [14.1, 121.14]), "$opt -> its own km saved with the option");
-}
-ok($km('avoid_tolls') !== $COMP, 'different options give different km (fake service)');
-
-// ---------------------------------------------------------------------
-section('C. Manual override of the computed km');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => $fmt($COMP + 1)])), 'km different from computed WITHOUT a reason is refused', 400, 'Give the reason');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => $fmt($COMP + 0.01)])), 'even 0.01 km difference needs a reason', 400, 'Give the reason');
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => $fmt($COMP + 0.5), 'distance_override_reason' => 'Gate is 500 m inside the port']));
-$t = $T($r['trip_id']);
-ok($t['distance_source'] === 'Map (edited)' && (float)$t['distance_km'] === round($COMP + 0.5, 2) && (float)$t['distance_computed_km'] === $COMP && $t['distance_override_reason'] === 'Gate is 500 m inside the port',
-   'with a reason -> Map (edited); billable km, computed km and reason kept');
-ok(!str_contains($r['message'], '15%'), 'difference of 15% or less -> no 15% warning');
-$ev = one($p, "SELECT notes FROM trip_events WHERE trip_id=? AND event_type LIKE 'trip created%'", [$r['trip_id']]);
-ok(str_contains((string)$ev['notes'], 'Map (edited)') && str_contains((string)$ev['notes'], 'reference') && str_contains((string)$ev['notes'], 'Gate is 500 m'), 'history shows edited source, reference km and reason', (string)$ev['notes']);
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => $fmt($COMP * 1.5), 'distance_override_reason' => 'Detour for truck ban']));
-ok(str_contains($r['message'], '15%'), 'difference above 15% -> warning in the result', $r['message']);
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => '99', 'distance_override_reason' => str_repeat('r', 301)])), 'reason longer than 300 characters refused');
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => $fmt($COMP), 'distance_source' => 'Client Route', 'distance_computed_km' => '1.00', 'distance_provider' => 'fake', 'distance_override_reason' => '']));
-$t = $T($r['trip_id']);
-ok($t['distance_source'] === 'Map' && (float)$t['distance_computed_km'] === $COMP && $t['distance_provider'] === 'openrouteservice/driving-hgv', 'distance source / computed km / provider sent by the browser are ignored');
-
-// ---------------------------------------------------------------------
-section('D. Manual fallback');
-$before = Routing::$outboundCalls;
-$r = Trips::action($ops, 'create', $trip(['distance_km' => '12.34']));
-$t = $T($r['trip_id']);
-ok($t['distance_source'] === 'Manual' && $t['distance_km'] === '12.34' && $t['distance_computed_km'] === null && $t['route_option'] === null && Routing::$outboundCalls === $before && $line($r['trip_id']) === null,
-   'no route option -> Manual (typed km), no map call, no line');
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => '7.00', 'pickup_lat' => '', 'pickup_lng' => '']));
-ok($T($r['trip_id'])['distance_source'] === 'Manual', 'route option but a point not pinned -> Manual');
+section('A-D. Planning without an approved route is retired (kenneth: every Operations Head trip uses an approved route)');
+$noRoute = ['client_route_id' => ''];
+fails(fn() => Trips::action($ops, 'create', $trip($noRoute + ['route_option' => 'recommended', 'distance_km' => $fmt($COMP)])), 'map distance without an approved route refused', 400, 'approved client route');
+fails(fn() => Trips::action($ops, 'create', $trip($noRoute + ['distance_km' => '12.34'])), 'typed (manual) km without an approved route refused', 400, 'approved client route');
 $NEXT = [503, 'down'];
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'general_roads', 'distance_km' => '8.10', 'pickup_lat' => '14.1200', 'pickup_lng' => '121.1300']));
-$t = $T($r['trip_id']);
-ok($t['distance_source'] === 'Manual' && $t['distance_km'] === '8.10' && $t['route_option'] === null && str_contains($r['message'], 'Manual'), 'map service down -> typed km saved as Manual with a note', $r['message']);
-$NEXT = [503, 'down'];
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'general_roads', 'pickup_lat' => '14.1300', 'pickup_lng' => '121.1300'])),
-    'map service down and no km typed (Operations Head) -> asked to type the km', 400, 'billable distance');
-$cfg(['ORS_API_KEY' => '']);
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'distance_km' => '6.50', 'pickup_lat' => '14.1400', 'pickup_lng' => '121.1300']));
-ok($T($r['trip_id'])['distance_source'] === 'Manual' && str_contains($r['message'], 'Manual'), 'map service not set up -> Manual with a note (manual trip creation still works)');
+fails(fn() => Trips::action($ops, 'create', $trip($noRoute + ['route_option' => 'general_roads', 'distance_km' => '8.10'])), 'map service down does not open a manual path', 400, 'approved client route');
 $NEXT = null;
-$r = Trips::action($wvd, 'create', $trip(['route_option' => 'recommended', 'truck_type' => 'Wing Van', 'pickup_lat' => '14.1500', 'pickup_lng' => '121.1300']));
-$t = $T($r['trip_id']);
-ok($t['status'] === 'Pending Review' && $t['distance_km'] === null && $t['distance_source'] === 'Manual', 'dispatcher request with no km while the service is off -> saved, km left for the Operations Head', json_encode([$t['status'], $t['distance_km'], $t['distance_source'], $r['message']]));
-$cfg();
+fails(fn() => Trips::action($wvd, 'create', $trip(['route_option' => 'recommended'])), 'Dispatchers cannot originate trips', 403);
+ok((int)one($p, 'SELECT COUNT(*) AS n FROM trips')['n'] === 0, 'refused planning created nothing');
 
 // ---------------------------------------------------------------------
 section('E. Approved client route');
@@ -236,88 +180,59 @@ $t = $T($r['trip_id']);
 ok($t['distance_source'] === 'Client Route' && $t['distance_km'] === '21.00' && (float)$t['pickup_lat'] === $TAN[0] && $line($r['trip_id']) === null, 'route without map pins -> route km used, the trip keeps its own pins, no line');
 
 // ---------------------------------------------------------------------
-section('F. Review of a dispatcher request (Scenario B)');
-$r = Trips::action($wvd, 'create', $trip(['route_option' => 'recommended', 'truck_type' => 'Wing Van', 'pickup_lat' => '14.0600', 'pickup_lng' => '121.1500']));
-$id = $r['trip_id']; $t = $T($id);
-ok($t['status'] === 'Pending Review' && $t['distance_source'] === 'Map' && $t['distance_km'] !== null, 'dispatcher request saved with the computed road distance');
-$form = ['trip_id' => $id, 'decision' => 'approve', 'truck_type' => 'Wing Van', 'pickup_point' => $t['pickup_point'], 'delivery_point' => $t['delivery_point'],
-         'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'pickup_lat' => $t['pickup_lat'], 'pickup_lng' => $t['pickup_lng'],
-         'delivery_lat' => $t['delivery_lat'], 'delivery_lng' => $t['delivery_lng'], 'route_option' => 'recommended', 'distance_km' => $t['distance_km']];
-$before = Routing::$outboundCalls; $REQ = [];
-$res = Trips::action($ops, 'review', $form);
-$t2 = $T($id);
-ok($t2['distance_source'] === 'Map' && $t2['distance_km'] === $t['distance_km'] && $t2['distance_computed_at'] === $t['distance_computed_at'] && count($REQ) === 0, 'review with unchanged distance -> saved distance kept (no new map call)');
-ok($t2['status'] === 'Pre-Assigned', 'review still confirms and auto-assigns', $t2['status']);
-$r = Trips::action($wvd, 'create', $trip(['truck_type' => 'Wing Van', 'distance_km' => '5.00']));
-$id = $r['trip_id']; $t = $T($id);
-$form = ['trip_id' => $id, 'decision' => 'approve', 'truck_type' => 'Wing Van', 'pickup_point' => $t['pickup_point'], 'delivery_point' => $t['delivery_point'],
-         'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'client_route_id' => (string)$rWV];
-$res = Trips::action($ops, 'review', $form);
-$t2 = $T($id);
-ok($t2['distance_source'] === 'Client Route' && $t2['distance_km'] === '9.50' && (int)$t2['client_route_id'] === $rWV && $line($id) === 'route_line_1', 'Operations Head picks an approved route at review -> route km, pins and line');
-$r = Trips::action($wvd, 'create', $trip(['truck_type' => 'Wing Van', 'route_option' => 'recommended', 'pickup_lat' => '14.0700', 'pickup_lng' => '121.1500']));
-$t = $T($r['trip_id']);
-fails(fn() => Trips::action($ops, 'review', ['trip_id' => $r['trip_id'], 'decision' => 'approve', 'truck_type' => 'Wing Van', 'pickup_point' => $t['pickup_point'], 'delivery_point' => $t['delivery_point'],
-    'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)), 'pickup_lat' => $t['pickup_lat'], 'pickup_lng' => $t['pickup_lng'], 'delivery_lat' => $t['delivery_lat'], 'delivery_lng' => $t['delivery_lng'],
-    'route_option' => 'recommended', 'distance_km' => $fmt((float)$t['distance_km'] + 3)]), 'review: km changed without a reason refused', 400, 'Give the reason');
-ok($T($r['trip_id'])['status'] === 'Pending Review', 'refused review leaves the request Pending Review');
-$res = Trips::action($ops, 'review', ['trip_id' => $r['trip_id'], 'decision' => 'reject', 'reason' => 'Test reject']);
-ok($T($r['trip_id'])['status'] === 'Rejected', 'reject still works (no distance check on reject)');
+section('F. Review of a dispatcher request (retired; see trip_approval_tests.php)');
+fails(fn() => Trips::action($ops, 'review', ['trip_id' => 1, 'decision' => 'approve']), 'request review is retired', 409);
 
 // ---------------------------------------------------------------------
 section('G. Edit before dispatch');
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'pickup_lat' => '14.0800', 'pickup_lng' => '121.1500']));
+$r = Trips::action($ops, 'create', $trip(['client_route_id' => (string)$rWV]));
 $id = $r['trip_id']; $t = $T($id);
 $edit = function (array $o = []) use ($id, $T) { $t = $T($id); return $o + ['trip_id' => $id, 'pickup_point' => $t['pickup_point'], 'delivery_point' => $t['delivery_point'], 'scheduled_at' => str_replace(' ', 'T', substr($t['scheduled_at'], 0, 16)),
-    'pickup_lat' => $t['pickup_lat'], 'pickup_lng' => $t['pickup_lng'], 'delivery_lat' => $t['delivery_lat'], 'delivery_lng' => $t['delivery_lng'], 'route_option' => $t['route_option'] ?? '', 'distance_km' => $t['distance_km'], 'client_route_id' => (string)($t['client_route_id'] ?? '')]; };
+    'pickup_lat' => $t['pickup_lat'], 'pickup_lng' => $t['pickup_lng'], 'delivery_lat' => $t['delivery_lat'], 'delivery_lng' => $t['delivery_lng'], 'distance_km' => $t['distance_km']]; };
 $REQ = [];
 Trips::action($ops, 'edit', $edit(['delivery_details' => 'Call the guard']));
 $t2 = $T($id);
-ok($t2['distance_source'] === 'Map' && $t2['distance_computed_at'] === $t['distance_computed_at'] && count($REQ) === 0 && $t2['delivery_details'] === 'Call the guard', 'edit of other details -> distance kept, no map call');
-fails(fn() => Trips::action($ops, 'edit', $edit(['distance_km' => $fmt((float)$t['distance_km'] + 2)])), 'edit: km changed without a reason refused', 400, 'Give the reason');
-Trips::action($ops, 'edit', $edit(['route_option' => '', 'distance_km' => '30.00']));
+ok($t2['distance_source'] === 'Client Route' && (int)$t2['client_route_id'] === $rWV && count($REQ) === 0 && $t2['delivery_details'] === 'Call the guard', 'edit of other details -> route and distance kept, no map call');
+fails(fn() => Trips::action($ops, 'edit', $edit(['distance_km' => '11.50'])), 'edit: km changed without a reason refused', 400, 'Give the reason');
+fails(fn() => Trips::action($ops, 'edit', $edit(['client_route_id' => '', 'distance_km' => '30.00'])), 'edit: the approved route cannot be removed (no switch to manual km)', 400, 'cannot be removed');
+Trips::action($ops, 'edit', $edit(['distance_km' => '10.00', 'distance_override_reason' => 'Second gate']));
 $t2 = $T($id);
-ok($t2['distance_source'] === 'Manual' && $t2['distance_km'] === '30.00' && $t2['distance_computed_km'] === null && $line($id) === null, 'edit to manual km (no option) -> Manual, line removed');
+ok($t2['distance_source'] === 'Client Route (edited)' && $t2['distance_km'] === '10.00' && $t2['distance_computed_km'] === '9.50', 'edit with a reason -> Client Route (edited), route km kept as reference');
 $ch = one($p, "SELECT c.changes_json FROM audit_event_changes c JOIN audit_events a ON a.id=c.audit_event_id WHERE a.record_ref=? ORDER BY a.id DESC LIMIT 1", ['trip ' . $id]);
-ok(str_contains((string)($ch['changes_json'] ?? ''), '"Distance source"') && str_contains((string)$ch['changes_json'], '"Manual"'), 'Activity Log records the distance source change', (string)($ch['changes_json'] ?? 'none'));
-Trips::action($ops, 'edit', $edit(['client_route_id' => (string)$rWV, 'distance_km' => '9.50', 'route_option' => '']));
-ok($T($id)['distance_source'] === 'Client Route' && $line($id) === 'route_line_1', 'edit: choose an approved route');
+ok(str_contains((string)($ch['changes_json'] ?? ''), '"Distance source"') && str_contains((string)$ch['changes_json'], 'Client Route (edited)'), 'Activity Log records the distance source change', (string)($ch['changes_json'] ?? ''));
 run($p, "UPDATE client_routes SET status='Inactive' WHERE id=?", [$rWV]);
-$t = $T($id);
-Trips::action($ops, 'edit', $edit(['client_route_id' => (string)$rWV, 'distance_km' => '9.50', 'route_option' => '', 'delivery_details' => 'Gate 2']));
-ok($T($id)['distance_source'] === 'Client Route' && (int)$T($id)['client_route_id'] === $rWV, 'route deactivated later -> unchanged trip keeps its saved route (history)');
-fails(fn() => Trips::action($ops, 'edit', $edit(['client_route_id' => (string)$rWV, 'distance_km' => '11.00', 'distance_override_reason' => 'more', 'route_option' => ''])), 'deactivated route cannot be used for a CHANGED distance', 409);
+Trips::action($ops, 'edit', $edit(['delivery_details' => 'Gate 2']));
+ok(str_starts_with($T($id)['distance_source'], 'Client Route') && (int)$T($id)['client_route_id'] === $rWV, 'route deactivated later -> unchanged trip keeps its saved route (history)');
+fails(fn() => Trips::action($ops, 'edit', $edit(['client_route_id' => (string)$rWV, 'distance_km' => '11.00', 'distance_override_reason' => 'more'])), 'deactivated route cannot be re-chosen with a new km');
 run($p, "UPDATE client_routes SET status='Approved' WHERE id=?", [$rWV]);
-$res = Trips::action($wvd, 'edit', ['trip_id' => $id, 'booking_reference' => 'BK-1', 'distance_km' => '1.00', 'client_route_id' => '', 'route_option' => 'general_roads']);
-ok($T($id)['distance_km'] === '9.50' && $T($id)['booking_reference'] === 'BK-1', 'dispatcher edit cannot change the distance (only booking / container / units)');
+$kmNow = $T($id)['distance_km'];
+Trips::action($wvd, 'edit', ['trip_id' => $id, 'booking_reference' => 'BK-1', 'distance_km' => '1.00', 'client_route_id' => '', 'route_option' => 'general_roads']);
+ok($T($id)['distance_km'] === $kmNow && (int)$T($id)['client_route_id'] === $rWV && $T($id)['booking_reference'] === 'BK-1', 'dispatcher edit cannot change the distance or route (only booking / container / units)');
 
 // Checklist #27 (CHECKLIST_27_TRIP_DETAILS_LOCK_V1): no booking / delivery / distance edits from Dispatched onward.
-$r = Trips::action($ops, 'create', $trip(['route_option' => 'recommended']));
+$r = Trips::action($ops, 'create', $trip(['client_route_id' => (string)$rWV]));
 $lid = $r['trip_id'];
 foreach (['Dispatched', 'In Transit', 'On Hold - Incident Reported', 'Completed', 'Cancelled', 'Rejected'] as $status) {
     run($p, 'UPDATE trips SET status=? WHERE id=?', [$status, $lid]);
     $before = $T($lid); $calls = Routing::$outboundCalls;
     $tryOps = ['trip_id' => $lid, 'pickup_point' => 'CHANGED', 'delivery_point' => $before['delivery_point'], 'scheduled_at' => str_replace(' ', 'T', substr($before['scheduled_at'], 0, 16)),
-        'pickup_lat' => '14.2000', 'pickup_lng' => '121.1000', 'delivery_lat' => $before['delivery_lat'], 'delivery_lng' => $before['delivery_lng'],
-        'route_option' => 'general_roads', 'distance_km' => '99.00', 'distance_override_reason' => 'try', 'client_route_id' => (string)$rWV];
+        'distance_km' => '99.00', 'distance_override_reason' => 'try', 'client_route_id' => (string)$rWV];
     fails(fn() => Trips::action($ops, 'edit', $tryOps), "#27 edit lock: Operations Head cannot edit a $status trip", 409);
     fails(fn() => Trips::action($wvd, 'edit', ['trip_id' => $lid, 'booking_reference' => 'BK-LOCK', 'container_number' => 'CONT1', 'delivery_details' => 'x']), "#27 edit lock: dispatcher cannot edit a $status trip", 409);
     $after = $T($lid);
-    ok($after === $before && Routing::$outboundCalls === $calls && $line($lid) === 'triplineA', "#27 edit lock: $status trip, distance and line unchanged; no map call");
+    ok($after === $before && Routing::$outboundCalls === $calls && $line($lid) === 'route_line_1', "#27 edit lock: $status trip, distance and line unchanged; no map call");
 }
-run($p, "UPDATE trips SET status='Pre-Assigned' WHERE id=?", [$lid]);
+run($p, "UPDATE trips SET status='Awaiting Resources' WHERE id=?", [$lid]);
 
 // ---------------------------------------------------------------------
 section('H. Invalid inputs');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'teleport', 'distance_km' => '8'])), 'unknown route option refused');
-fails(fn() => Trips::action($ops, 'create', $trip(['distance_km' => '8.123'])), 'km with more than 2 decimals refused');
-fails(fn() => Trips::action($ops, 'create', $trip(['distance_km' => '3000.01'])), 'km above 3000 refused');
-fails(fn() => Trips::action($ops, 'create', $trip(['distance_km' => '-5'])), 'negative km refused');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'pickup_lat' => '35.68', 'pickup_lng' => '139.69'])), 'pin outside the Philippines refused', 400, 'outside the Philippines');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'recommended', 'pickup_lng' => ''])), 'half pin refused', 400, 'incomplete');
+$bad = fn(array $o) => $trip($o + ['client_route_id' => (string)$rWV, 'distance_override_reason' => 'Validation fixture']);
+fails(fn() => Trips::action($ops, 'create', $bad(['distance_km' => '8.123'])), 'km with more than 2 decimals refused', 400);
+fails(fn() => Trips::action($ops, 'create', $bad(['distance_km' => '3000.01'])), 'km above 3000 refused', 400);
+fails(fn() => Trips::action($ops, 'create', $bad(['distance_km' => '-5'])), 'negative km refused', 400);
 fails(fn() => Trips::action($ops, 'create', $trip(['client_route_id' => 'abc'])), 'route id that is not a number refused');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => 'teleport', 'distance_km' => '8', 'pickup_lat' => '', 'pickup_lng' => ''])), 'unknown route option refused even without map pins');
-fails(fn() => Trips::action($ops, 'create', $trip(['route_option' => ['x'], 'distance_km' => '8'])), 'route option as a list refused');
+fails(fn() => Trips::action($ops, 'create', $bad(['distance_km' => '9', 'distance_override_reason' => str_repeat('r', 301)])), 'reason longer than 300 characters refused');
+ok((int)one($p, "SELECT COUNT(*) AS n FROM trips WHERE distance_km IN (8.123, 3000.01, -5, 9)")['n'] === 0, 'invalid inputs saved nothing');
 
 // ---------------------------------------------------------------------
 section('I. Roles and what the screen receives');
@@ -337,8 +252,8 @@ foreach (['finance', 'billing', 'audit', 'motorpool', 'purchasing'] as $role)
     fails(fn() => Routes::action($U($role), 'selectable', ['client_id' => $cid]), "$role cannot list routes for trips", 403);
 fails(fn() => Trips::action($U('finance'), 'create', $trip(['distance_km' => '5'])), 'finance cannot create a trip', 403);
 fails(fn() => Trips::action($ccd, 'create', $trip(['truck_type' => 'Wing Van', 'client_route_id' => (string)$rWV])), 'dispatcher cannot create a trip of the other team (route or not)');
-$r = Trips::action($ccd, 'create', $trip(['truck_type' => 'Car Carrier', 'client_route_id' => (string)$rCC]));
-ok($T($r['trip_id'])['distance_source'] === 'Client Route', 'Car Carrier dispatcher can use a Car Carrier approved route');
+$r = Trips::action($ops, 'create', $trip(['truck_type' => 'Car Carrier', 'client_route_id' => (string)$rCC]));
+ok($T($r['trip_id'])['distance_source'] === 'Client Route' && $T($r['trip_id'])['dispatcher_role'] === 'car_carrier_dispatcher', 'Car Carrier trip planned on a Car Carrier approved route for the Car Carrier group');
 $det = Trips::action($ops, 'details', ['trip_id' => $r['trip_id']]);
 ok($det['trip']['client_route_ref'] === one($p, 'SELECT route_ref FROM client_routes WHERE id=?', [$rCC])['route_ref'] && $det['trip']['route_geometry'] !== null
    && array_key_exists('distance_override_reason', $det['trip']) && !str_contains(json_encode($det), 'rate_amount'), 'trip details: route reference, line and distance fields; no route rates');
@@ -350,9 +265,9 @@ ok(!str_contains((string)file_get_contents($LOG), KEY), 'API key never written t
 section('J. Trip workflow regression');
 $routeSum = fn() => array_map(fn($t) => $p->query("CHECKSUM TABLE $t")->fetch()['Checksum'], ['client_routes', 'client_route_rates', 'client_rates', 'disbursements']);
 $RS = $routeSum();
-$r = Trips::action($ops, 'create', $trip(['client_route_id' => (string)$rWV, 'distance_km' => '12.00', 'distance_override_reason' => 'Extra stop']));
+$r = test_create_planned_trip($ops, $trip(['client_route_id' => (string)$rWV, 'distance_km' => '12.00', 'distance_override_reason' => 'Extra stop']));
 $id = $r['trip_id']; $t = $T($id);
-ok($t['status'] === 'Pre-Assigned' && (int)one($p, "SELECT COUNT(*) AS n FROM trip_assignments WHERE trip_id=?", [$id])['n'] >= 3, 'assignment holds truck, driver and helper');
+ok($t['status'] === 'Pre-Assigned' && (int)one($p, "SELECT COUNT(*) AS n FROM trip_assignments WHERE trip_id=?", [$id])['n'] >= 3, 'Dispatcher fixed-pair assignment holds truck, driver and helper');
 // Pre-dispatch checklist and fund release are not changed by Phase 3: set their results directly.
 run($p, "UPDATE trips SET status='Ready for Dispatch' WHERE id=?", [$id]);
 insert($p, 'inspections', ['trip_id' => $id, 'vehicle_id' => $t['vehicle_id'], 'attempt_number' => 1, 'kind' => 'Pre-Dispatch', 'items_json' => '{}', 'actor_id' => $wvd['id'], 'completed_at' => date('Y-m-d H:i:s')]);
@@ -361,8 +276,8 @@ insert($p, 'fund_requests', ['fund_ref' => 'FR-T-1', 'trip_id' => $id, 'attempt_
 run($p, 'UPDATE trips SET scheduled_at=? WHERE id=?', [date('Y-m-d H:i:s', time() + 300), $id]);
 $res = Trips::action($wvd, 'dispatch', ['trip_id' => $id]);
 $b = one($p, 'SELECT * FROM billings WHERE trip_id=?', [$id]);
-ok($b && $b['status'] === 'Ongoing' && $b['distance_km'] === '12.00' && $b['rate_per_km'] === '50.00' && $b['base_amount'] === '600.00',
-   'billing draft = billable km x client rate per km (route flat rate NOT used; formula unchanged)', json_encode($b ? array_intersect_key($b, array_flip(['distance_km', 'rate_per_km', 'base_amount'])) : null));
+$snap = $b ? json_decode((string)one($p, 'SELECT snapshot_json FROM billing_pricing WHERE billing_id=?', [$b['id']])['snapshot_json'], true) : null;
+ok($b && $b['status'] === 'Ongoing' && $snap && (float)$b['base_amount'] === (float)($snap['total'] ?? $snap['fixed']), 'billing draft = the route pricing frozen at dispatch (kenneth fixed-route pricing)', json_encode($b ? [$b['base_amount'], $snap['fixed'] ?? null] : null));
 fails(fn() => Trips::action($wvd, 'complete', ['trip_id' => $id, 'completed_at' => date('Y-m-d\TH:i'), 'waybill_number' => 'WB-1']), 'completion without documents refused', 422, 'delivery receipt (DR) file');
 foreach (['Waybill' => 'wb', 'Acknowledgement Receipt' => 'ar'] as $cat => $s) {
     $const = $cat === 'Waybill' ? (new ReflectionClassConstant('Trips', 'DOC_WAYBILL'))->getValue() : (new ReflectionClassConstant('Trips', 'DOC_AR'))->getValue();

@@ -1,0 +1,26 @@
+# Deployment package: `git archive --format=zip -o mulawin_deploy.zip HEAD` leaves out development-only files.
+# They stay in the repository for local development and tests.
+/tests                          export-ignore
+/docs                           export-ignore
+/automation                     export-ignore
+/storage/patch_backups          export-ignore
+*.bak                           export-ignore
+/LocalValetDriver.php           export-ignore
+/phpunit.xml                    export-ignore
+/composer.json                  export-ignore
+/composer.lock                  export-ignore
+/AGENTS.md                      export-ignore
+/CLAUDE.md                      export-ignore
+/README-initial.md              export-ignore
+/CHANGELOG.md                   export-ignore
+/dashboard_styles.css           export-ignore
+/public/seed_test_data.php      export-ignore
+/database/seed_masterlists.sql  export-ignore
+/scripts/showcase               export-ignore
+/scripts/dev_setup_accounts.php export-ignore
+/scripts/seed_test_data.php     export-ignore
+/scripts/visual_test_seed.php   export-ignore
+/scripts/demo_workflow_seed.php export-ignore
+/scripts/demo_workflow_cleanup.php export-ignore
+/.gitattributes                 export-ignore
+/.gitignore                     export-ignore

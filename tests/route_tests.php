@@ -13,7 +13,7 @@
  *    B. Role permissions (actions and page access)
  *    C. Route request validation and normalization
  *    D. Rate entry validation
- *    E. Approval / rejection (new route vs revision), separation of duties
+ *    E. Approval / rejection (new route vs revision), Admin-only rate decision
  *    F. Rate revision safety: atomic supersede, rollback on failure, concurrent approval
  *    G. Duplicate prevention (application and database keys), truck types, directional routes
  *    H. Selectable routes, withdraw, deactivate, history

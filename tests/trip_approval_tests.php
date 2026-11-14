@@ -1,5 +1,14 @@
 <?php
-/** Isolated MariaDB scenarios. Run only through run_trip_approval_tests.php. */
+/**
+ * Isolated MariaDB scenarios. Run only through run_trip_approval_tests.php.
+ *
+ * The Dispatcher trip-request -> Operations Head review queue was RETIRED by kenneth (Trips::review answers 409;
+ * Dispatchers cannot create trips). This suite replaces the old queue tests with the current guarantees:
+ *   A. no new request can be created (Dispatchers of both groups) and review is retired for every role;
+ *   B. legacy "Pending Review" records stay read-only history (only the Operations Head legacy view lists them;
+ *      they cannot be edited, assigned or dispatched);
+ *   C. the Operations Head plans directly: Awaiting Resources, no automatic resources, actor recorded.
+ */
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 require_once dirname(__DIR__) . '/backend/Actions.php';
@@ -7,15 +16,6 @@ require_once __DIR__ . '/_launcher.php';
 $fresh = envValue('DB_NAME');
 test_guard([$fresh]);
 Actions::load('Trips');
-
-if (($argv[1] ?? '') === 'worker') {
-    $user = json_decode($argv[2], true, 512, JSON_THROW_ON_ERROR);
-    $payload = json_decode($argv[3], true, 512, JSON_THROW_ON_ERROR);
-    while (microtime(true) < (float)$argv[4]) usleep(10000);
-    try { $r = Trips::action($user, 'review', $payload); echo json_encode(['ok' => true, 'message' => $r['message']]); }
-    catch (BusinessRuleException $e) { echo json_encode(['ok' => false, 'code' => $e->httpStatus, 'message' => $e->getMessage()]); }
-    exit;
-}
 
 $passed = 0; $failed = 0;
 function approval_check(bool $condition, string $label): void {
@@ -25,7 +25,7 @@ function approval_check(bool $condition, string $label): void {
 }
 function approval_refusal(callable $fn, int $status, string $label): void {
     try { $fn(); approval_check(false, $label); }
-    catch (BusinessRuleException $e) { approval_check($e->httpStatus === $status, $label); }
+    catch (BusinessRuleException $e) { approval_check($e->httpStatus === $status, $label . " ({$e->httpStatus})"); }
 }
 
 test_recreate($fresh);
@@ -33,67 +33,44 @@ $p = db();
 test_import($p, test_sql('database/schema.sql'));
 test_import($p, test_sql('database/extension.sql'));
 $users = [];
-foreach (['operations_head', 'container_wingvan_dispatcher', 'motorpool'] as $role) {
-    $id = insert($p, 'users', ['username' => 'approval_' . $role, 'email' => $role . '@example.test', 'password_hash' => 'fixture', 'full_name' => 'Fixture ' . $role, 'role' => $role]);
-    $users[$role] = ['id' => $id, 'role' => $role, 'full_name' => 'Fixture ' . $role];
+foreach (['operations_head' => null, 'container_wingvan_dispatcher' => 'Day', 'car_carrier_dispatcher' => 'Day', 'motorpool' => null, 'admin' => null] as $role => $shift) {
+    $id = insert($p, 'users', ['username' => 'appr_' . $role, 'email' => "appr_$role@example.test", 'password_hash' => 'x', 'full_name' => 'APPR ' . $role, 'role' => $role, 'shift' => $shift]);
+    $users[$role] = ['id' => $id, 'role' => $role, 'shift' => $shift, 'full_name' => 'APPR ' . $role];
 }
-$ops = $users['operations_head']; $dispatcher = $users['container_wingvan_dispatcher'];
-$client = insert($p, 'clients', ['company_name' => 'ISOLATED APPROVAL CLIENT', 'status' => 'Active', 'created_by' => $ops['id']]);
-insert($p, 'client_rates', ['client_id' => $client, 'truck_type' => 'Wing Van', 'rate_per_km' => '50', 'minimum_charge' => '0', 'updated_by' => $ops['id']]);
-$base = ['client_id' => $client, 'truck_type' => 'Wing Van', 'pickup_point' => 'FIXTURE TANAUAN', 'delivery_point' => 'FIXTURE MALVAR', 'distance_km' => '25', 'scheduled_at' => date('Y-m-d\TH:i', time() + 10800)];
-$ids = [];
-for ($i = 0; $i < 15; $i++) $ids[] = Trips::action($dispatcher, 'create', $base)['trip_id'];
-$opsCreated = Trips::action($ops, 'create', $base)['trip_id'];
-$read = fn(array $q = []) => Trips::read($ops, 'trips', ['view' => 'approvals'] + $q)['approval'];
-$pending = $read();
-approval_check($pending['counts']['pending'] === 15 && $pending['counts']['approved'] === 0, 'only dispatcher requests count; Operations Head auto-created trip excluded');
-approval_check($pending['total'] === 15 && count($pending['rows']) === 12 && $pending['pages'] === 2, 'server pagination reports full pending total');
-approval_check(count($read(['approval_page' => 2])['rows']) === 3, 'second page contains remaining rows');
+['operations_head' => $ops, 'container_wingvan_dispatcher' => $cw, 'car_carrier_dispatcher' => $cc, 'motorpool' => $mp] = $users;
+$client = insert($p, 'clients', ['company_name' => 'APPROVAL CLIENT', 'status' => 'Active', 'created_by' => $ops['id']]);
+$base = ['client_id' => $client, 'truck_type' => 'Wing Van', 'pickup_point' => 'APPROVAL ORIGIN', 'delivery_point' => 'APPROVAL DESTINATION',
+         'scheduled_at' => date('Y-m-d\TH:i', time() + 86400), 'distance_km' => '25'];
 
-$approved = Trips::action($ops, 'review', ['trip_id' => $ids[0], 'decision' => 'approve'] + $base);
-approval_check(str_contains($approved['message'], 'Awaiting Resources'), 'existing approval engine retains automatic awaiting-resource behavior');
-approval_check($read(['approval' => 'approved'])['counts']['approved'] === 1, 'approved request classified from persisted decision');
-// Simulate a later lifecycle in the disposable fixture; do not bypass the live dispatch workflow.
-run($p, "UPDATE trips SET status='Completed', completed_at=NOW() WHERE id=?", [$ids[0]]);
-approval_check($read(['approval' => 'approved'])['rows'][0]['status'] === 'Completed', 'completed dispatcher trip remains approved in history');
-approval_refusal(fn() => Trips::action($ops, 'review', ['trip_id' => $ids[0], 'decision' => 'approve'] + $base), 409, 'processed approval cannot be repeated');
-approval_refusal(fn() => Trips::action($ops, 'review', ['trip_id' => $ids[0], 'decision' => 'reject', 'reason' => 'Late rejection']), 409, 'invalid completed-to-rejected transition refused');
-Trips::action($ops, 'review', ['trip_id' => $ids[1], 'decision' => 'reject', 'reason' => 'Fixture missing supporting records']);
-approval_check(one($p, 'SELECT cancel_reason FROM trips WHERE id=?', [$ids[1]])['cancel_reason'] === 'Fixture missing supporting records', 'rejection reason persists');
-approval_check($read(['approval' => 'rejected'])['counts']['rejected'] === 1, 'recorded rejection event classifies rejected queue');
-approval_refusal(fn() => Trips::action($ops, 'review', ['trip_id' => $ids[1], 'decision' => 'reject', 'reason' => 'Repeated']), 409, 'rejection cannot be repeated');
-run($p, "UPDATE trips SET status='Rejected' WHERE id=?", [$ids[2]]);
-run($p, "UPDATE trips SET status='Cancelled' WHERE id=?", [$ids[3]]);
-$evidence = $read();
-approval_check($evidence['counts']['rejected'] === 1 && $evidence['counts']['unclassified'] === 2, 'status-only legacy rejection and unreviewed cancellation do not fabricate decisions');
-approval_check($read(['q' => 'ISOLATED APPROVAL CLIENT', 'client_id' => $client, 'truck_type' => 'Wing Van', 'requester_id' => $dispatcher['id']])['total'] === 11, 'search and supported filters combine');
-run($p, "UPDATE trips SET created_at='2000-01-01 12:00:00' WHERE id=?", [$ids[4]]);
-approval_check($read(['request_from' => date('Y-m-d'), 'request_to' => date('Y-m-d')])['total'] === 10, 'date filter uses request creation rather than dispatch schedule');
-approval_refusal(fn() => Trips::action($dispatcher, 'review', ['trip_id' => $ids[5], 'decision' => 'reject', 'reason' => 'Denied']), 403, 'dispatcher cannot reject by direct API');
-approval_refusal(fn() => Trips::read($users['motorpool'], 'trips', ['view' => 'approvals']), 403, 'maintenance role cannot read dedicated approval projection');
+// A. no new requests; review retired
+foreach (['container_wingvan_dispatcher' => $cw, 'car_carrier_dispatcher' => $cc] as $label => $u)
+    approval_refusal(fn() => Trips::action($u, 'create', $base + ['truck_type' => $label === 'car_carrier_dispatcher' ? 'Car Carrier' : 'Wing Van']), 403, "$label cannot originate a trip request");
+approval_check((int)one($p, 'SELECT COUNT(*) AS n FROM trips')['n'] === 0, 'refused requests created nothing');
 
-if (function_exists('proc_open')) {
-    $raceId = $ids[5]; $start = microtime(true) + 1.5; $workers = [];
-    for ($i = 0; $i < 2; $i++) {
-        $pipes = [];
-        $process = proc_open([PHP_BINARY, __FILE__, 'worker', json_encode($ops), json_encode(['trip_id' => $raceId, 'decision' => 'approve'] + $base), (string)$start], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
-        if (!is_resource($process)) throw new RuntimeException('Cannot start approval concurrency worker.');
-        $workers[] = [$process, $pipes];
-    }
-    $outcomes = [];
-    foreach ($workers as [$process, $pipes]) {
-        $stdout = stream_get_contents($pipes[1]); $stderr = stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
-        $exit = proc_close($process);
-        if ($exit !== 0) throw new RuntimeException('Approval worker failed: ' . $stderr);
-        $outcomes[] = json_decode(trim($stdout), true, 512, JSON_THROW_ON_ERROR);
-    }
-    approval_check(count(array_filter($outcomes, fn($r) => $r['ok'])) === 1 && count(array_filter($outcomes, fn($r) => !$r['ok'] && $r['code'] === 409)) === 1, 'concurrent approval produces one success and one stale refusal');
-    approval_check((int)one($p, "SELECT COUNT(*) AS n FROM trip_events WHERE trip_id=? AND event_type='trip details confirmed by Operations Head'", [$raceId])['n'] === 1, 'concurrent approval records one confirmation event');
-} else {
-    throw new RuntimeException('proc_open is required to verify concurrent approval.');
-}
+// B. a legacy Pending Review record (historical data from before the retirement)
+$legacy = insert($p, 'trips', ['trip_ref' => 'TRP-LEGACY-1', 'intake_source' => 'Dispatcher', 'created_by' => $cw['id'], 'client_id' => $client, 'truck_type' => 'Wing Van',
+    'dispatcher_role' => $cw['role'], 'pickup_point' => 'LEGACY ORIGIN', 'delivery_point' => 'LEGACY DESTINATION', 'scheduled_at' => date('Y-m-d H:i:s', time() + 86400), 'status' => 'Pending Review']);
+approval_refusal(fn() => Trips::action($ops, 'review', ['trip_id' => $legacy, 'decision' => 'approve']), 409, 'Operations Head review is retired (historical requests stay read-only)');
+approval_refusal(fn() => Trips::action($cw, 'review', ['trip_id' => $legacy, 'decision' => 'reject', 'reason' => 'x']), 403, 'dispatcher cannot review by direct API');
+approval_refusal(fn() => Trips::action($mp, 'review', ['trip_id' => $legacy, 'decision' => 'approve']), 403, 'maintenance role cannot review');
+approval_check(one($p, 'SELECT status FROM trips WHERE id=?', [$legacy])['status'] === 'Pending Review', 'refused reviews leave the legacy record unchanged');
+$active = array_map('intval', array_column(Trips::read($ops, 'trips', [])['active'], 'id'));
+approval_check(!in_array($legacy, $active, true), 'legacy request is not active work');
+$legacyView = array_map('intval', array_column(Trips::read($ops, 'trips', ['legacy' => '1'])['history'], 'id'));
+approval_check($legacyView === [$legacy], 'Operations Head legacy history lists the historical request');
+$cwHistory = array_map('intval', array_column(Trips::read($cw, 'trips', ['legacy' => '1'])['history'] ?? [], 'id'));
+approval_check(!in_array($legacy, $cwHistory, true), 'the legacy view is Operations Head only (parameter ignored for others)');
+approval_refusal(fn() => Trips::action($ops, 'edit', ['trip_id' => $legacy, 'pickup_point' => 'X', 'delivery_point' => 'Y', 'scheduled_at' => date('Y-m-d\TH:i', time() + 86400), 'distance_km' => '25']), 409, 'legacy request cannot be edited');
+approval_refusal(fn() => Trips::action($cw, 'dispatch', ['trip_id' => $legacy]), 403, 'legacy request cannot be dispatched (no responsible account)');
 
-approval_check((bool)one($p, "SELECT id FROM audit_events WHERE area='Trips' AND record_ref=?", ['trip ' . $ids[1]]), 'decision audit trail exists');
-test_drop($fresh);
+// C. direct Operations Head planning (the replacement workflow)
+$created = test_create_planned_trip($ops, $base, false);
+$t = one($p, 'SELECT * FROM trips WHERE id=?', [$created['trip_id']]);
+approval_check($t['status'] === 'Awaiting Resources' && !$t['vehicle_id'] && !$t['driver_id'] && !$t['helper_id'], 'Operations Head plans directly: Awaiting Resources, no automatic resources');
+approval_check((int)$t['created_by'] === $ops['id'] && $t['client_route_id'] !== null, 'planned trip records its creator and approved route');
+$event = one($p, "SELECT actor_id, to_status FROM trip_events WHERE trip_id=? ORDER BY id LIMIT 1", [$t['id']]);
+approval_check($event && (int)$event['actor_id'] === $ops['id'] && $event['to_status'] === 'Awaiting Resources', 'creation event recorded with the Operations Head as actor');
+approval_check((int)one($p, "SELECT COUNT(*) AS n FROM audit_events WHERE area='Trips' AND actor_id=?", [$ops['id']])['n'] >= 1, 'planning decision audit trail exists');
+
 echo "RESULT: $passed passed, $failed failed\n";
 exit($failed ? 1 : 0);

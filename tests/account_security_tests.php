@@ -40,7 +40,7 @@ function section(string $t): void { echo "\n== $t ==\n"; }
 $mailDir = sys_get_temp_dir() . '/mulawin_mail_' . bin2hex(random_bytes(4)); mkdir($mailDir);
 $sinkStart = function () use ($mailDir) {
     @unlink($mailDir . '/ready');
-    $proc = proc_open([PHP_BINARY, __DIR__ . '/_smtp_sink.php', envValue('TEST_SMTP_PORT'), $mailDir], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
+    $proc = proc_open([PHP_BINARY, __DIR__ . '/_smtp_sink.php', envValue('TEST_SMTP_PORT'), $mailDir], [1 => ['file', (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null'), 'w'], 2 => ['file', (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null'), 'w']], $pipes);
     for ($i = 0; $i < 50 && !is_file($mailDir . '/ready'); $i++) usleep(100000);
     return $proc;
 };
@@ -175,7 +175,10 @@ ok(!preg_match('/\b\d{6}\b/', $body) && !str_contains($body, $ecode) && !str_con
     'notice has no code, no password and no link', $body);
 ok(str_contains($r['message'], 'notice was sent to your previous email'), 'user is told the notice was sent');
 ok($audits($f, 'email change notice sent') === 1 && $audits($f, 'email verified and updated') === 1, 'change and notice are audited');
-ok(!one($p, 'SELECT id FROM trusted_login_devices WHERE user_id=?', [$f['id']]), 'trusted devices still revoked (unchanged)');
+// 657a761 removed trusted devices: the leftover row above must not be able to sign anyone in, so no sign-in code may read the table.
+$readers = array_filter(array_merge(glob(dirname(__DIR__) . '/backend/*.php'), glob(dirname(__DIR__) . '/backend/*/*.php'), glob(dirname(__DIR__) . '/backend/*/*/*.php'), [dirname(__DIR__) . '/public/index.php']),
+    fn($f) => str_contains((string)file_get_contents($f), 'trusted_login_devices'));
+ok($readers === [], 'no sign-in code reads trusted_login_devices (a stored device token cannot bypass the password)', implode(', ', $readers));
 // Mail problem: the change stays, nothing breaks.
 proc_terminate($sink); proc_close($sink);
 $g = $mkUser('gina');

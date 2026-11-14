@@ -299,7 +299,7 @@ catch (PDOException $e) { ok(($e->errorInfo[1] ?? 0) === 4025, 'database refuses
 section('I. Real curl code against the local mock server');
 $port = 18000 + random_int(0, 999);
 $mockLog = tempnam(sys_get_temp_dir(), 'orsreq');
-$proc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$port", __DIR__ . '/_mock_ors.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pp, null, ['MOCK_ORS_LOG' => $mockLog] + getenv());
+$proc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$port", __DIR__ . '/_mock_ors.php'], [1 => ['file', (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null'), 'w'], 2 => ['file', (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null'), 'w']], $pp, null, ['MOCK_ORS_LOG' => $mockLog] + getenv());
 usleep(700000);
 Routing::useTransport(null);
 $cfg(['ORS_BASE_URL' => "http://127.0.0.1:$port", 'ORS_API_KEY' => 'mock-ors-key']);

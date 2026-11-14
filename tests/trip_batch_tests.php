@@ -215,9 +215,11 @@ ok($retry['results'][0]['result'] === 'Created' && $retry['results'][0]['row'] =
 $all = $batch($ops, $rows);
 ok(array_column($all['results'], 'result') === ['Already created', 'Already created', 'Already created'] && $tripCount() === $n4 + 3, 'sending all three again: nothing duplicated');
 ok(count(array_unique(array_column($all['results'], 'trip_id'))) === 3, 'three different trips, one per row');
-fails(fn() => $batch($ops, [$row(['distance_km' => '', 'row_no' => '5'])]), 'retry with a row problem names the screen row number', 400, 'Row 5:');
-$js = (string)file_get_contents(dirname(__DIR__) . '/public/assets/js/modules/operations/trips.js');
-ok(str_contains($js, "filter(tr => !tr.dataset.done)") && str_contains($js, 'Retry not-created row(s)') && str_contains($js, 'request_key: tr.dataset.key, row_no:'), 'screen: Retry sends only not-created rows with their original keys');
+// kenneth: every Ops Head row needs an approved route (which also supplies the km), so the invalid row is one without a route.
+fails(fn() => $batch($ops, [$row(['client_route_id' => '', 'row_no' => '5'])]), 'retry with a row problem names the screen row number', 400, 'Row 5:');
+// kenneth: batch planning moved to the Operations Head workspace (ops-head.js); retry resends only pending drafts with their keys.
+$js = (string)file_get_contents(dirname(__DIR__) . '/public/assets/js/modules/operations/ops-head.js');
+ok(str_contains($js, "App.api('Trips.create_batch', { rows: pending.map(") && str_contains($js, 'request_key: x.key, row_no:') && str_contains($js, 'Retry with the same request keys.'), 'screen: Retry sends only not-created rows with their original keys');
 ok(!str_contains($js, 'Nothing is created until every row is correct'), 'old all-or-nothing wording removed');
 
 }

@@ -34,7 +34,7 @@ final class Actions {
         'Attendance' => 'Administration',
         'Analytics' => 'General', 'Documents' => 'General', 'Maps' => 'General',
         'HeadManagement' => 'Administration',
-        'Admin' => 'Administration',
+        'Admin' => 'Administration', 'Oversight' => 'Administration',
     ];
 
     /** Loads backend/Modules/<Department>/<Name>.php safely and returns the class name. */

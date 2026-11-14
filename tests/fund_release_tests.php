@@ -79,7 +79,7 @@ $n = 0;
 /** Pre-Assigned trip with an approved (Ready for Release) fund request; schedule set directly. */
 $approvedFund = function (int $minutesAhead = 60) use ($ops, $wvd, $cid, $routeId, $p, &$n): array {
     $n++;
-    $r = Trips::action($ops, 'create', ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "PICKUP $n", 'delivery_point' => "DELIVERY $n",
+    $r = test_create_planned_trip($ops, ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "PICKUP $n", 'delivery_point' => "DELIVERY $n",
         'scheduled_at' => date('Y-m-d\TH:i', time() + 3 * 86400), 'distance_km' => '25.00', 'dispatcher_assignment'=>'container_wingvan_dispatcher:Day',
         'responsible_dispatcher_id'=>$wvd['id'], 'client_route_id'=>$routeId]);
     // This isolated Funds fixture starts at the post-assignment state.

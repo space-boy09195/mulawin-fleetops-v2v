@@ -1,0 +1,14 @@
+<?php
+/*
+ * =====================================================================
+ *  tests/run_maintenance_overview_tests.php  —  Maintenance Overview (Phase 1) + maintenance workflow regression
+ * =====================================================================
+ *  RUN:  TEST_DB_USER=fleet_test TEST_DB_PASS=secret php tests/run_maintenance_overview_tests.php
+ *        (XAMPP: set TEST_DB_USER=root / set TEST_DB_PASS= / C:\xampp\php\php.exe tests\run_maintenance_overview_tests.php)
+ *  Drops and re-creates ONLY: mulawin_maintov_fresh_test
+ *  Exit code 0 = every test passed.
+ * =====================================================================
+ */
+declare(strict_types=1);
+require __DIR__ . '/_launcher.php';
+exit(run_isolated_tests('maintenance_overview_tests.php', 'mulawin_maintov', ['fresh'], '2026-11-08_08_attendance'));

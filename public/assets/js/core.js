@@ -241,24 +241,31 @@ const App = {
       operations_head: ['dashboard', 'trips', 'trucks', 'crew', 'clients', 'routes', 'funds'],
       car_carrier_dispatcher: ['dashboard', 'trips', 'funds'],
       container_wingvan_dispatcher: ['dashboard', 'trips', 'funds'],
-      motorpool: ['dashboard', 'maintenance', 'trucks', 'mechanics', 'purchasing'],
-      purchasing: ['dashboard', 'purchasing'],
-      finance: ['dashboard', 'funds', 'finance', 'purchasing'],
+      // MOTORPOOL_WORKSPACE_PHASE1: the Motorpool workspace in work order (server me.nav still decides what is allowed).
+      motorpool: ['maintenance_overview', 'maintenance', 'mp_parts_requests', 'mechanics', 'mechanic_attendance', 'maint_history', 'trucks'],
+      purchasing: ['purchasing_overview', 'parts_requests', 'purchase_orders', 'inventory', 'stock_movements', 'purchasing_reports'],
+      finance: ['dashboard', 'funds', 'finance', 'purchase_orders', 'purchasing_reports'],
       billing: ['dashboard', 'billing', 'clients', 'routes'],
       audit: ['dashboard', 'reports', 'admin'],
     };
     const shortNames = {
       trips: 'Trips', trucks: 'Trucks', crew: 'Drivers', clients: 'Clients',
-      routes: 'Client routes', mechanics: 'Mechanics', maintenance: 'Maintenance',
-      purchasing: 'Parts & purchasing', funds: 'Trip funds', billing: 'Billing',
+      routes: 'Client routes', mechanics: 'Mechanics', maintenance: 'Maintenance', maintenance_overview: 'Maintenance overview',
+      funds: 'Trip funds', billing: 'Billing',
       finance: 'Finance', reports: 'Reports', admin: 'Users & settings',
+      maint_history: 'Maintenance history', mp_parts_requests: 'Parts requests', mechanic_attendance: 'Mechanic attendance',
+      purchasing_overview: 'Purchasing overview', parts_requests: 'Parts requests', purchase_orders: 'Purchase orders',
+      inventory: 'Inventory', stock_movements: 'Stock movements', purchasing_reports: 'Purchasing reports',
     };
+    // Role-specific menu wording (labels only).
+    const roleShortNames = { motorpool: { maintenance: 'Repair management', trucks: 'Truck masterlist', mechanics: 'Mechanic masterlist' } };
+    const nameOf = (id) => (roleShortNames[u.role] || {})[id] || shortNames[id];
     const order = mainPages[u.role] || ['dashboard'];
     const allowed = me.nav.filter(n => n.id !== 'notifications'); // bell already links to notifications
     const primary = order.map(id => allowed.find(n => n.id === id)).filter(Boolean);
     const primaryIds = new Set(primary.map(n => n.id));
     const extra = allowed.filter(n => !primaryIds.has(n.id));
-    const link = n => `<a href="#${n.id}" class="nav-item-link" data-nav="${n.id}"><i class="bi ${n.icon}" aria-hidden="true"></i><span>${UI.esc(n.id === 'admin' && u.role === 'audit' ? 'Activity log' : n.id === 'funds' && ['car_carrier_dispatcher', 'container_wingvan_dispatcher'].includes(u.role) ? 'My Trip Funds' : shortNames[n.id] || n.label)}</span></a>`;
+    const link = n => `<a href="#${n.id}" class="nav-item-link" data-nav="${n.id}"><i class="bi ${n.icon}" aria-hidden="true"></i><span>${UI.esc(n.id === 'admin' && u.role === 'audit' ? 'Activity log' : n.id === 'funds' && ['car_carrier_dispatcher', 'container_wingvan_dispatcher'].includes(u.role) ? 'My Trip Funds' : nameOf(n.id) || n.label)}</span></a>`;
     const operationsRole = ['operations_head', 'car_carrier_dispatcher', 'container_wingvan_dispatcher'].includes(u.role);
     const tripLink = (label, icon, query) => `<a href="#trips?${query}" class="nav-item-link" data-nav="trips" data-trip-section="${query}"><i class="bi ${icon}" aria-hidden="true"></i><span>${label}</span></a>`;
     let nav;
@@ -323,12 +330,33 @@ const App = {
       nav = `<div class="nav-section">My workspace</div>${operationsRole ? primary.filter(n => n.id === 'dashboard').map(link).join('') + '<div class="nav-section">Operations</div>' + tripLink('New Trip', 'bi-plus-circle', 'new=1') + tripLink('Active Trips', 'bi-signpost-split', 'tab=active') + tripLink('Trip History', 'bi-clock-history', 'tab=history') + tripLink('Incidents', 'bi-exclamation-triangle', 'tab=incidents') + primary.filter(n => !['dashboard', 'trips'].includes(n.id)).map(link).join('') : primary.map(link).join('')}`;
       if (extra.length) nav += `<details class="sidebar-more" id="sidebarMore"><summary><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i><span>More tools</span><i class="bi bi-chevron-down sidebar-more-chevron" aria-hidden="true"></i></summary><div class="sidebar-more-items">${extra.map(link).join('')}</div></details>`;
     }
+    // WS_SHELL_V1: Maintenance and Accounting roles (Motorpool, Purchasing, Finance, Billing, Audit) get one grouped
+    // workspace menu with the profile at the bottom. Links come only from me.nav (server-side permissions); nothing is added.
+    const ws = UI.wsNav(u.role);
+    const profileMenu = `<div class="dropdown-header">${UI.esc(u.username)} · ${UI.esc(u.email || '')}</div>
+                <button class="dropdown-item" id="mySig"><i class="bi bi-pen"></i> My e-signature${u.has_signature ? '' : ' <span class="badge-s amber">not set</span>'}</button>
+                <button class="dropdown-item" id="chgPw"><i class="bi bi-key"></i> Change password</button>
+                <button class="dropdown-item" id="chgEmail"><i class="bi bi-envelope-check"></i> Change email</button>
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item text-danger" id="logoutBtn"><i class="bi bi-box-arrow-right"></i> Log out</button>`;
+    if (ws) {
+      const wsLink = (n) => `<a href="#${n.id}" class="nav-item-link" data-nav="${n.id}" title="${UI.esc(n.label)}"><i class="bi ${UI.esc(n.icon)}" aria-hidden="true"></i><span>${UI.esc(n.label)}</span></a>`;
+      nav = ws.groups.map(g => `<div class="nav-group"><div class="nav-section">${UI.esc(g.title)}</div>${g.items.map(wsLink).join('')}</div>`).join('');
+    }
+    // UI CORRECTION: account controls stay in the top bar for every role; the workspace sidebar is navigation only.
+    const sideFoot = ws ? '' : `<div class="sidebar-foot">${UI.esc(u.role_label)}${u.shift ? ' · ' + UI.esc(u.shift) + ' shift' : ''}</div>`;
+    document.body.classList.toggle('ws-body', !!ws);   // drawers and modals live outside #appShell
+    document.body.classList.toggle('ref-body', !!(ws && ws.exclusive));   // REF_FIDELITY_V1: Motorpool / Purchasing drawers
+    let collapsed = false;
+    try { collapsed = !!ws && localStorage.getItem('ws-sidebar-collapsed') === '1'; } catch { /* storage unavailable */ }
     document.getElementById('app').innerHTML = `
-    <div class="app-shell" id="appShell">
+    <div class="app-shell${ws ? ' ws-app' : ''}${ws && ws.exclusive ? ' ref-app' : ''}${collapsed ? ' sb-collapsed' : ''}" id="appShell">
       <aside class="sidebar" id="appSidebar" aria-label="Main menu">
-        <a href="#dashboard" class="sidebar-brand">${UI.logoTag('sidebar-logo')}<span><span class="brand-product">Mulawin FleetOps</span><span class="brand-company">R.P. Mulawin Trucking</span></span></a>
+        <div class="sidebar-top"><a href="#${this.homePage()}" class="sidebar-brand">${UI.logoTag('sidebar-logo')}<span class="brand-text"><span class="brand-product">${ws ? 'MULAWIN' : 'Mulawin FleetOps'}</span><span class="brand-company">${ws ? (ws.exclusive ? 'FleetOps' : 'FleetOps · ' + UI.esc(ws.dept)) : 'R.P. Mulawin Trucking'}</span></span></a>
+          ${ws ? `<button type="button" class="sb-collapse sb-desktop" id="sbCollapse" aria-label="${collapsed ? 'Expand' : 'Collapse'} the menu" title="${collapsed ? 'Expand' : 'Collapse'} the menu" aria-pressed="${collapsed}"><i class="bi bi-layout-sidebar-inset" aria-hidden="true"></i></button>
+            <button type="button" class="sb-collapse sb-mobile" id="sbClose" aria-label="Close the menu"><i class="bi bi-x-lg" aria-hidden="true"></i></button>` : ''}</div>
         <nav class="sidebar-nav">${nav}</nav>
-        <div class="sidebar-foot">${UI.esc(u.role_label)}${u.shift ? ' · ' + UI.esc(u.shift) + ' shift' : ''}</div>
+        ${sideFoot}
       </aside>
       <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
       <div class="main">
@@ -345,16 +373,9 @@ const App = {
               </div>
             </div>
             <div class="dropdown">
-              <button class="profile-btn" type="button" data-bs-toggle="dropdown"><span class="avatar">${UI.esc(initials)}</span>
-                <span class="profile-text"><span class="profile-name">${UI.esc(u.full_name)}</span><span class="profile-role">${UI.esc(u.role_label)}</span></span><i class="bi bi-chevron-down"></i></button>
-              <div class="dropdown-menu dropdown-menu-end">
-                <div class="dropdown-header">${UI.esc(u.username)} · ${UI.esc(u.email || '')}</div>
-                <button class="dropdown-item" id="mySig"><i class="bi bi-pen"></i> My e-signature${u.has_signature ? '' : ' <span class="badge-s amber">not set</span>'}</button>
-                <button class="dropdown-item" id="chgPw"><i class="bi bi-key"></i> Change password</button>
-                <button class="dropdown-item" id="chgEmail"><i class="bi bi-envelope-check"></i> Change email</button>
-                <div class="dropdown-divider"></div>
-                <button class="dropdown-item text-danger" id="logoutBtn"><i class="bi bi-box-arrow-right"></i> Log out</button>
-              </div>
+              <button class="profile-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account settings for ${UI.esc(u.full_name)}"><span class="avatar">${UI.esc(initials)}</span>
+                <span class="profile-text"><span class="profile-name">${UI.esc(u.full_name)}</span><span class="profile-role">${UI.esc(u.role_label)}${ws && u.shift ? ' · ' + UI.esc(u.shift) + ' shift' : ''}</span></span><i class="bi bi-chevron-down"></i></button>
+              <div class="dropdown-menu dropdown-menu-end">${profileMenu}</div>
             </div>
           </div>
         </header>
@@ -381,6 +402,13 @@ const App = {
     const sb = document.getElementById('appSidebar'), bd = document.getElementById('sidebarBackdrop');
     document.getElementById('menuBtn').onclick = () => { sb.classList.add('open'); bd.classList.add('show'); };
     bd.onclick = () => { sb.classList.remove('open'); bd.classList.remove('show'); };
+    document.getElementById('sbClose')?.addEventListener('click', () => bd.onclick());
+    document.getElementById('sbCollapse')?.addEventListener('click', (e) => {
+      const shell = document.getElementById('appShell'), on = shell.classList.toggle('sb-collapsed'), b = e.currentTarget;
+      b.setAttribute('aria-pressed', String(on)); b.title = (on ? 'Expand' : 'Collapse') + ' the menu'; b.setAttribute('aria-label', b.title);
+      try { localStorage.setItem('ws-sidebar-collapsed', on ? '1' : '0'); } catch { /* storage unavailable */ }
+    });
+    sb.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sb.classList.contains('open')) { bd.onclick(); document.getElementById('menuBtn')?.focus(); } });
     document.getElementById('logoutBtn').onclick = () => UI.confirm('Log out', 'Log out of Mulawin FleetOps?', () => this.logout(), { submit: 'Log out' });
     document.getElementById('chgPw').onclick = () => this.passwordScreen();
     document.getElementById('chgEmail').onclick = () => this.emailScreen();
@@ -428,6 +456,15 @@ const App = {
   },
 
   // ---------------------------------------------------------------- router (#page?x=y)
+  /** Landing page per role. The server's me.nav decides what exists; this only picks the first page to show. */
+  homePage() {
+    const landing = { motorpool: 'maintenance_overview', purchasing: 'purchasing_overview', finance: 'finance_overview', billing: 'billing_overview', audit: 'audit_overview' }[this.me?.user?.role] || 'dashboard';
+    const nav = this.me?.nav || [];
+    return nav.some(n => n.id === landing) ? landing : (nav[0]?.id || 'dashboard');
+  },
+  legacyPurchasingPage() {
+    return { motorpool: 'mp_parts_requests', purchasing: 'parts_requests' }[this.me?.user?.role] || 'purchase_orders';
+  },
   go(page, query = {}) {
     const qs = new URLSearchParams(query).toString();
     const hash = '#' + page + (qs ? '?' + qs : '');
@@ -435,8 +472,18 @@ const App = {
   },
   async route() {
     if (!this.me) return;
-    const [page, qs] = (location.hash.slice(1) || 'dashboard').split('?');
+    let [page, qs] = (location.hash.slice(1) || this.homePage()).split('?');
+    // Old notification / bookmark links to the former combined "Parts & Purchasing" page.
+    if (page === 'purchasing') { page = this.legacyPurchasingPage(); history.replaceState(null, '', '#' + page + (qs ? '?' + qs : '')); }
     const query = Object.fromEntries(new URLSearchParams(qs || ''));
+    // WS_NAV_STATE_V1: on workspace pages, ?open= / ?new= / ?report= are one-shot requests (open this record / form once).
+    // They are taken out of the URL and the query before the page renders, so tab, filter and card links built from the
+    // query never carry them, and Back / Forward / Reload never reopen a record the user already closed.
+    // Operations pages keep their own query handling (e.g. trips?new is a page state there).
+    const once = {};
+    if (UI.WS_PAGES.has(page)) ['open', 'new', 'report'].forEach(k => { if (query[k] !== undefined) { once[k] = query[k]; delete query[k]; } });
+    const canon = '#' + page + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
+    if (Object.keys(once).length) history.replaceState(null, '', canon);
     const entry = this.me.nav.find(n => n.id === page);
     const nav = entry ? {...entry,label:UI.operationsLabel(entry.label)} : null;
     // FLEETOPS_ACCESS_ANALYTICS_V1: render an explicit denial without requesting restricted page data.
@@ -458,9 +505,9 @@ const App = {
           <div class="panel-body" style="padding:28px">
             <h1 class="page-title"><i class="bi bi-shield-lock me-2" aria-hidden="true"></i>Access denied</h1>
             <p class="text-muted mt-2">Your account does not have permission to open this page. Contact your administrator if you need access.</p>
-            <button type="button" class="btn btn-primary mt-2" id="accessReturnHome"><i class="bi bi-house me-1" aria-hidden="true"></i> Return to dashboard</button>
+            <button type="button" class="btn btn-primary mt-2" id="accessReturnHome"><i class="bi bi-house me-1" aria-hidden="true"></i> Return to my home page</button>
           </div></section>`;
-        content.querySelector('#accessReturnHome')?.addEventListener('click', () => this.go('dashboard'));
+        content.querySelector('#accessReturnHome')?.addEventListener('click', () => this.go(this.homePage()));
       }
       return;
     }
@@ -486,9 +533,14 @@ const App = {
     if (headGroup) headGroup.open = true;
     document.getElementById('appSidebar').classList.remove('open'); document.getElementById('sidebarBackdrop').classList.remove('show');
     if (this._rpmScrollNavigation) requestAnimationFrame(this._rpmScrollNavigation);
-    document.getElementById('crumbs').innerHTML = `${nav.section ? `<span class="crumb-sec">${UI.esc(nav.section)}</span><i class="bi bi-chevron-right"></i>` : ''}<span class="crumb-page">${UI.esc(nav.label)}</span>`;
-    document.title = nav.label + ' · Mulawin FleetOps';
+    const wsItem = UI.wsNavItem(page);   // WS_SHELL_V1: workspace group + short label, same as the menu
+    const crumbSec = wsItem ? wsItem.group : nav.section, crumbLabel = wsItem ? wsItem.label : nav.label;
+    document.getElementById('crumbs').innerHTML = `${crumbSec ? `<span class="crumb-sec">${UI.esc(crumbSec)}</span><i class="bi bi-chevron-right"></i>` : ''}<span class="crumb-page">${UI.esc(crumbLabel)}</span>`;
+    document.title = crumbLabel + ' · Mulawin FleetOps';
     const el = document.getElementById('pageContent');
+    // STAGE_B_WORKSPACE_UI: compact table styling only on Maintenance and Accounting pages (Operations pages unchanged).
+    el.classList.toggle('ws-scope', UI.WS_PAGES.has(page) || (page === 'admin' && UI.role('audit')));
+    el.classList.toggle('ref-scope', UI.REF_PAGES.has(page) && document.body.classList.contains('ref-body'));
     const def = this.pages[page];
     if (!def) {
       el.innerHTML = `<div class="page-head"><div><h1 class="page-title">${UI.esc(nav.label)}</h1></div></div>
@@ -499,6 +551,17 @@ const App = {
         <div class="page-actions no-print" id="pageTools"></div>
         <button type="button" id="rpmBackToTop" class="rpm-back-to-top no-print" aria-label="Back to top" title="Back to top" hidden><span>Back to top</span></button></div>
         <div id="pageBody" class="page-body"><div class="loading-block"><span class="spinner-border spinner-border-sm"></span> Loading…</div></div>`;
+    // A drawer or dialog belongs to the list it was opened from: close it when the user moves to another page, or
+    // (workspace pages) to another tab / filter of the same page. A plain reload of the same view keeps it.
+    const moved = this._lastPage !== page || (UI.WS_PAGES.has(page) && canon !== this._lastCanon);
+    if (moved) this.navSeq = (this.navSeq || 0) + 1;
+    if (moved && UI.WS_PAGES.has(page)) document.querySelectorAll('.modal.show').forEach(m => bootstrap.Modal.getInstance(m)?.hide());
+    if (moved) {
+      document.querySelectorAll('.offcanvas.app-drawer').forEach(o => { bootstrap.Offcanvas.getInstance(o)?.hide(); o.remove(); });
+      document.querySelectorAll('.offcanvas-backdrop').forEach(x => x.remove());
+      document.body.style.removeProperty('overflow'); document.body.style.removeProperty('padding-right');
+    }
+    this._lastCanon = canon;
     if (this._lastPage !== page) {
       window.scrollTo(0, 0);
       // A details drawer belongs to its page: close it when the user moves to another page.
@@ -508,7 +571,7 @@ const App = {
     }
     this._lastPage = page;
     const body = document.getElementById('pageBody');
-    const ctx = { page, query, el: body, tools: document.getElementById('pageTools'), me: this.me, data: null,
+    const ctx = { page, query, once, el: body, tools: document.getElementById('pageTools'), me: this.me, data: null,
       reload: () => this.route(), go: (p, q) => this.go(p, q), setQuery: (q) => this.go(page, { ...query, ...q }),
       setTitle: (t, s) => { t=UI.operationsLabel(t);if(UI.role('operations_head')||UI.isDispatcher()){document.title=t+' \u00b7 Mulawin FleetOps';const crumbs=document.getElementById('crumbs');if(crumbs)crumbs.textContent=t;} document.getElementById('pageTitle').textContent = t; const st = document.getElementById('pageSubtitle'); if (st) st.textContent = s || ''; } };
     try {
@@ -541,6 +604,209 @@ const App = {
 // =====================================================================
 //  UI HELPERS
 // =====================================================================
+/** Pages of the Maintenance (Motorpool, Purchasing) and Accounting (Finance, Billing, Audit) workspaces. */
+UI.WS_PAGES = new Set(['maintenance_overview', 'maintenance', 'maint_history', 'mp_parts_requests', 'mechanics', 'mechanic_attendance', 'maintenance_reports',
+  'purchasing_overview', 'parts_requests', 'purchase_orders', 'inventory', 'stock_movements', 'purchasing_reports',
+  'admin_overview', 'admin_approvals', 'admin_operations', 'admin_maintenance', 'admin_purchasing', 'admin_finance', 'admin_reports', 'admin_analytics',
+  'finance_overview', 'finance', 'finance_budgets', 'funds', 'billing_overview', 'billing', 'billing_collections', 'billing_receivables', 'audit_overview', 'audit_logs', 'audit_history', 'audit_reports']);
+
+/** REF_FIDELITY_V1 — Motorpool and Purchasing pages drawn like docs/ui-reference/maintenance_reference.html. */
+UI.REF_PAGES = new Set(['maintenance_overview', 'maintenance', 'maint_history', 'mp_parts_requests', 'mechanics', 'mechanic_attendance', 'maintenance_reports',
+  'purchasing_overview', 'parts_requests', 'purchase_orders', 'inventory', 'stock_movements', 'purchasing_reports',
+  // HEAD_MANAGEMENT_V1: the Admin workspace pages, plus Users & Roles ('admin') and Audit Trail ('audit_logs') for the Admin
+  'admin_overview', 'admin_approvals', 'admin_operations', 'admin_maintenance', 'admin_purchasing', 'admin_finance', 'admin_reports', 'admin_analytics', 'admin', 'audit_logs']);
+UI.refPage = () => UI.REF_PAGES.has(App.current?.page) && document.body.classList.contains('ref-body');
+
+/* WS_SHELL_V1 — workspace menus of the in-scope roles. Presentation only: a page appears only when the server's
+   me.nav (Access::navFor) lists it, so no unauthorized page can be shown. Other permitted pages are grouped below
+   under short headings (Fleet & trips, Maintenance, Purchasing, Accounting, Records). Other roles keep the old menu. */
+UI.WS_MENUS = {
+  motorpool: { dept: 'Motorpool', section: 'Maintenance', exclusive: true, items: [['maintenance_overview', 'Overview', 'bi-speedometer2'], ['maintenance', 'Repair Management', 'bi-wrench-adjustable'],
+    ['mp_parts_requests', 'Parts Requests', 'bi-box-seam'], ['mechanics', 'Mechanic Masterlist', 'bi-person-gear'],
+    ['mechanic_attendance', 'Mechanic Attendance', 'bi-person-check'], ['maint_history', 'Maintenance History', 'bi-journal-check'], ['maintenance_reports', 'Reports', 'bi-graph-up']] },
+  purchasing: { dept: 'Purchasing', section: 'Purchasing', exclusive: true, items: [['purchasing_overview', 'Overview', 'bi-speedometer2'], ['parts_requests', 'Parts Requests', 'bi-box-arrow-up'],
+    ['purchase_orders', 'Purchase Orders', 'bi-cart-check'], ['inventory', 'Inventory', 'bi-boxes'], ['stock_movements', 'Stock Movements', 'bi-arrow-left-right'],
+    ['purchasing_reports', 'Reports', 'bi-graph-up']] },
+  finance: { dept: 'Finance', items: [['finance_overview', 'Overview', 'bi-speedometer2'], ['purchase_orders', 'Approvals', 'bi-check2-square'],
+    ['funds', 'Trip Funds', 'bi-cash-coin'], ['finance', 'Payables & Payments', 'bi-wallet2'], ['finance_budgets', 'Budgets & Expenses', 'bi-piggy-bank']] },
+  billing: { dept: 'Billing', items: [['billing_overview', 'Overview', 'bi-speedometer2'], ['billing', 'Billing & Invoices', 'bi-receipt'],
+    ['billing_collections', 'Collections', 'bi-cash-stack'], ['billing_receivables', 'Receivables', 'bi-hourglass-split'], ['reports', 'Billing Reports', 'bi-bar-chart-line']] },
+  // HEAD_MANAGEMENT_V1: the Admin's own sidebar (exclusive: no extra groups). Other pages the Admin may open stay reachable
+  // from the Records shortcuts of each monitoring page; permissions are unchanged (me.nav / Access::canOpen).
+  admin: { dept: 'Head Management', section: 'Management', exclusive: true, items: [['admin_overview', 'Overview', 'bi-speedometer2'], ['admin_approvals', 'Approvals', 'bi-check2-square'],
+    ['admin_operations', 'Operations', 'bi-signpost-split'], ['admin_maintenance', 'Maintenance', 'bi-wrench-adjustable'], ['admin_purchasing', 'Purchasing', 'bi-cart-check'],
+    ['admin_finance', 'Financial Oversight', 'bi-cash-coin'], ['admin_reports', 'Executive Reports', 'bi-clipboard-check'], ['admin_analytics', 'Analytics', 'bi-graph-up'],
+    ['admin', 'Users & Roles', 'bi-people'], ['audit_logs', 'Audit Trail', 'bi-journal-text']] },
+  audit: { dept: 'Audit', items: [['audit_overview', 'Overview', 'bi-speedometer2'], ['audit_logs', 'Audit Logs', 'bi-journal-text'],
+    ['audit_history', 'Transaction History', 'bi-clock-history'], ['audit_reports', 'Audit Reports', 'bi-clipboard-data']] },
+};
+UI.WS_GROUPS = [
+  ['Fleet & trips', ['trips', 'trucks', 'crew', 'clients', 'routes']],
+  ['Maintenance', ['maintenance_overview', 'maintenance', 'mp_parts_requests', 'mechanics', 'mechanic_attendance', 'maint_history', 'maintenance_reports']],
+  ['Purchasing', ['parts_requests', 'purchase_orders', 'inventory', 'stock_movements', 'purchasing_reports']],
+  ['Accounting', ['funds', 'finance', 'finance_budgets', 'billing', 'billing_collections', 'billing_receivables']],
+];
+/** Grouped menu for the role, or null when the role keeps the standard menu. */
+UI.wsNav = (role) => {
+  if (role === 'admin' || role === 'operations_head') return null; // Keep the approved executive and Operations sidebars.
+  const menu = UI.WS_MENUS[role]; if (!menu || !App.me) return null;
+  const allowed = (App.me.nav || []).filter(n => n.id !== 'notifications');
+  const byId = Object.fromEntries(allowed.map(n => [n.id, n]));
+  const used = new Set();
+  const main = menu.items.filter(([id]) => byId[id]).map(([id, label, icon]) => (used.add(id), { id, label, icon }));
+  const groups = [{ title: menu.section || menu.dept, main: true, items: main }];
+  // REF_FIDELITY_V1: Motorpool and Purchasing show ONLY their approved workspace items (no Fleet & trips / Records groups).
+  // Presentation only: other permitted pages (e.g. a truck record linked from a repair) stay reachable through
+  // in-page links, because UI.canGo and the server still use me.nav / Access::canOpen.
+  if (menu.exclusive) return { dept: menu.dept, exclusive: true, groups };
+  const rest = allowed.filter(n => !used.has(n.id));
+  UI.WS_GROUPS.forEach(([title, ids]) => {
+    const items = rest.filter(n => ids.includes(n.id) && !used.has(n.id));
+    items.forEach(n => used.add(n.id));
+    if (items.length) groups.push({ title: title === menu.dept ? title + ' records' : title, items: items.map(n => ({ id: n.id, label: n.label, icon: n.icon })) });
+  });
+  const records = rest.filter(n => !used.has(n.id));
+  if (records.length) groups.push({ title: 'Records', items: records.map(n => ({ id: n.id, label: n.label, icon: n.icon })) });
+  return { dept: menu.dept, groups };
+};
+/** {group, label} of a page in the current workspace menu (for the breadcrumb); null outside workspace menus. */
+UI.wsNavItem = (page) => {
+  const ws = App.me && UI.wsNav(App.me.user.role); if (!ws) return null;
+  for (const g of ws.groups) { const it = g.items.find(n => n.id === page); if (it) return { group: g.main ? ws.dept : g.title, label: it.label }; }
+  return null;
+};
+/**
+ * Quick actions row for workspace overviews. items: [{label, icon, go: 'page?x=y'} | {label, icon, act: 'key', primary}]
+ * A "go" item is shown only when the user may open the page; "act" items are bound by the page (data-qa="key").
+ */
+UI.quickBar = (items) => {
+  const shown = (items || []).filter(it => it && (it.act || UI.canGo(it.go)));
+  if (!shown.length) return '';
+  return `<div class="mo-quickbar" role="group" aria-label="Quick actions"><span class="mo-quickbar-title">Quick actions</span><div class="mo-quickbar-row">${shown.map(it =>
+    `<button type="button" class="btn btn-sm ${it.primary ? 'btn-primary' : 'btn-outline-secondary'}" ${it.act ? `data-qa="${UI.esc(it.act)}"` : `data-go="${UI.esc(it.go)}"`}><i class="bi ${UI.esc(it.icon)}" aria-hidden="true"></i> ${UI.esc(it.label)}</button>`).join('')}</div></div>`;
+};
+
+/* UI_REFERENCE_V1 — building blocks of the approved Motorpool / Purchasing wireframe (docs/ui-reference).
+   Presentation only: every value and link comes from the page's authorized data; links show only when UI.canGo allows. */
+/** Status tabs that change the URL (?key=value). Other filters are kept; a one-time ?open= never travels with them. */
+UI.statusTabs = (page, q, key, tabs, active) => `<div class="line-tabs ws-status-tabs no-print" role="tablist">${tabs.map(([v, label, n]) => {
+  const next = { ...q, [key]: v }; delete next.open;
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(next).filter(([, x]) => x !== '' && x != null))).toString();
+  const on = String(v) === String(active);
+  return `<button type="button" role="tab" aria-selected="${on}" class="tab ${on ? 'active' : ''}" data-go="${UI.esc(page + (qs ? '?' + qs : ''))}">${UI.esc(label)}${n === undefined || n === null ? '' : ` <span class="tab-count">${UI.num(n)}</span>`}</button>`; }).join('')}</div>`;
+/** Overview / report panel: title, optional count, optional lightbulb suggestion (tipHtml), optional "See all" link. */
+UI.wsPanel = (title, icon, body, o = {}) => {
+  const go = o.go && UI.canGo(o.go);
+  return `<section class="panel ws-panel${o.cls ? ' ' + o.cls : ''}"><div class="panel-head"><h2 class="panel-title"><i class="bi ${UI.esc(icon)}" aria-hidden="true"></i>${UI.esc(title)}${o.count === undefined ? '' : ` <span class="text-muted fw-normal">${UI.num(o.count)}</span>`}</h2>
+    <div class="panel-tools">${o.tipHtml ? `<button type="button" class="ws-tip-btn" data-ws-tip aria-expanded="false" aria-haspopup="dialog" aria-label="Suggestion: ${UI.esc(title)}"><i class="bi bi-lightbulb" aria-hidden="true"></i> Suggestion</button>` : ''}${go ? `<button type="button" class="ws-seeall" data-go="${UI.esc(o.go)}">${UI.esc(o.goLabel || 'See all')} <i class="bi bi-arrow-right" aria-hidden="true"></i></button>` : ''}</div></div>
+    ${o.tipHtml ? `<template class="ws-tip-tpl">${o.tipHtml}</template>` : ''}
+    <div class="panel-body flush">${body}</div>${o.foot ? `<div class="ws-panel-foot">${o.foot}</div>` : ''}</section>`;
+};
+/* POPOVER_SUGGESTIONS_V1 — the lightbulb opens ONE floating popover attached to <body> (position: fixed), so no card
+   resizes and no overflow container clips it. Hover opens it on hover-capable devices; click / tap / Enter / Space
+   pins it. It closes on Escape, outside click, page navigation, or when another suggestion opens. No backdrop. */
+UI.tipPop = { el: null, btn: null, pinned: false, timer: 0, rect: null };
+UI.closeTip = (focusBack = false) => {
+  const s = UI.tipPop; clearTimeout(s.timer);
+  if (s.el) s.el.remove();
+  if (s.btn) { s.btn.setAttribute('aria-expanded', 'false'); s.btn.classList.remove('active'); if (focusBack) s.btn.focus(); }
+  s.el = null; s.btn = null; s.pinned = false; s.rect = null;
+};
+UI.placeTip = () => {
+  const { el, btn, rect } = UI.tipPop; if (!el || !btn) return;
+  if (!document.body.contains(btn)) return UI.closeTip();
+  const r = rect ? rect() : btn.getBoundingClientRect(), m = 8, vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const w = el.offsetWidth, h = el.offsetHeight;
+  // a point anchor (chart) centres the popover on the point; a button anchor aligns it to the button's right edge
+  let left = Math.min(Math.max(m, rect ? (r.left + r.right) / 2 - w / 2 : r.right - w), vw - w - m);
+  let top = r.bottom + 6;
+  if (top + h > vh - m && r.top - h - 6 > m) top = r.top - h - 6;      // flip above when there is no room below
+  top = Math.max(m, Math.min(top, vh - h - m));
+  el.style.left = left + 'px'; el.style.top = top + 'px';
+};
+UI.openTip = (btn, pinned) => {
+  const s = UI.tipPop;
+  if (s.btn === btn) { if (pinned) s.pinned = true; return; }
+  UI.closeTip();
+  const tpl = btn.closest('.ws-panel')?.querySelector('.ws-tip-tpl'); if (!tpl) return;
+  const el = document.createElement('div');
+  el.className = 'ws-popover'; el.id = 'wsTipPop'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', btn.getAttribute('aria-label') || 'Suggestion');
+  el.innerHTML = `<div class="ws-popover-head"><i class="bi bi-lightbulb" aria-hidden="true"></i> Suggested action<button type="button" class="ws-popover-x" aria-label="Close">&times;</button></div><div class="ws-popover-body">${tpl.innerHTML}</div>`;
+  document.body.append(el);
+  UI.bindGo(el);
+  el.querySelectorAll('[data-go]').forEach(x => x.addEventListener('click', () => UI.closeTip()));
+  el.querySelector('.ws-popover-x').onclick = () => UI.closeTip(true);
+  el.addEventListener('mouseenter', () => clearTimeout(s.timer));
+  el.addEventListener('mouseleave', () => { if (!s.pinned) s.timer = setTimeout(() => UI.closeTip(), 250); });
+  Object.assign(s, { el, btn, pinned: !!pinned });
+  btn.setAttribute('aria-expanded', 'true'); btn.setAttribute('aria-controls', 'wsTipPop'); btn.classList.add('active');
+  UI.placeTip();
+};
+UI.bindTips = (root) => root.querySelectorAll('[data-ws-tip]').forEach(b => {
+  const hover = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  b.addEventListener('click', (e) => { e.stopPropagation(); const s = UI.tipPop; if (s.btn === b && s.pinned) UI.closeTip(); else UI.openTip(b, true); });
+  if (hover) {
+    b.addEventListener('mouseenter', () => { clearTimeout(UI.tipPop.timer); if (UI.tipPop.btn !== b && !UI.tipPop.pinned) UI.openTip(b, false); });
+    b.addEventListener('mouseleave', () => { const s = UI.tipPop; if (s.btn === b && !s.pinned) s.timer = setTimeout(() => UI.closeTip(), 250); });
+  }
+});
+/** MOTORPOOL_REPORTS_V2 — the same single floating popover, anchored to a point (e.g. a chart point) of an owner element. */
+UI.openPointPop = (owner, rectFn, label, bodyHtml) => {
+  UI.closeTip();
+  const s = UI.tipPop, el = document.createElement('div');
+  el.className = 'ws-popover ws-popover-wide'; el.id = 'wsTipPop'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', label);
+  el.innerHTML = `<button type="button" class="ws-popover-x ws-popover-x-abs" aria-label="Close">&times;</button>${bodyHtml}`;
+  document.body.append(el);
+  UI.bindGo(el);
+  el.querySelectorAll('[data-go]').forEach(x => x.addEventListener('click', () => UI.closeTip()));
+  el.querySelector('.ws-popover-x').onclick = () => UI.closeTip(true);
+  Object.assign(s, { el, btn: owner, pinned: true, rect: rectFn });
+  UI.placeTip();
+  return el;
+};
+document.addEventListener('click', (e) => { const s = UI.tipPop; if (s.el && !s.el.contains(e.target) && !e.target.closest('[data-ws-tip]') && !(s.rect && s.btn && s.btn.contains(e.target))) UI.closeTip(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && UI.tipPop.el) { e.stopPropagation(); UI.closeTip(true); } }, true);
+window.addEventListener('hashchange', () => UI.closeTip());
+window.addEventListener('resize', () => UI.placeTip());
+window.addEventListener('scroll', () => UI.placeTip(), true);
+/** Short list entry for overview panels: title, sub-line, status chip on the right; the whole row opens `go`. */
+UI.wsEntry = (go, title, sub, side) => { const ok = go && UI.canGo(go);
+  return `<li class="mo-item${ok ? ' clickable' : ''}"${ok ? ` data-go="${UI.esc(go)}" role="link" tabindex="0"` : ''}><div class="mo-item-main"><div class="mo-item-top">${title}</div>${sub ? `<div class="mo-item-issue">${sub}</div>` : ''}</div><div class="mo-item-side">${side || ''}</div></li>`; };
+UI.wsList = (items, empty) => items.length ? `<ul class="mo-list mo-scroll">${items.join('')}</ul>` : `<div class="mo-empty"><i class="bi bi-check2-circle" aria-hidden="true"></i> ${UI.esc(empty)}</div>`;
+/** "2026-09" -> "Sep 2026". */
+UI.ym = (ym) => { const [y, m] = String(ym).split('-'); return new Date(+y, +m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' }); };
+UI.compactMoney = (v) => { const n = +v || 0, a = Math.abs(n); return '₱' + (a >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : UI.num(n)); };
+/** Grouped vertical bars (CSS only) from recorded values. series: [{label, data: [..]}]; fmt formats one value. */
+UI.wsBars = (labels, series, fmt = (v) => UI.num(v), empty = 'No records in this period.') => {
+  const max = Math.max(0, ...series.flatMap(s => s.data.map(x => +x || 0)));
+  if (!labels.length || !max) return `<div class="mo-empty"><i class="bi bi-bar-chart" aria-hidden="true"></i> ${UI.esc(empty)}</div>`;
+  return `<div class="ws-chart"><div class="ws-chart-legend">${series.map((s, i) => `<span><i class="sw-${i}" aria-hidden="true"></i>${UI.esc(s.label)}</span>`).join('')}</div>
+    <div class="ws-bars">${labels.map((l, j) => `<div class="ws-barset">${series.map((s, i) => { const v = +s.data[j] || 0;
+      return `<div class="ws-bar-col"><span class="ws-bar-v">${UI.esc(fmt(v))}</span><div class="ws-bar sw-${i}" style="height:${Math.round(v / max * 100)}%" role="img" aria-label="${UI.esc(s.label + ', ' + l + ': ' + fmt(v))}" title="${UI.esc(s.label + ' · ' + l + ': ' + fmt(v))}"></div></div>`; }).join('')}
+      <span class="ws-bar-label">${UI.esc(l)}</span></div>`).join('')}</div></div>`;
+};
+/** Ranking bars. rows: [{label, sub, value, display, go}] (value drives the bar; display is the shown figure). */
+UI.wsRank = (rows, empty) => {
+  if (!rows.length) return `<div class="mo-empty"><i class="bi bi-info-circle" aria-hidden="true"></i> ${UI.esc(empty)}</div>`;
+  const max = Math.max(...rows.map(r => +r.value || 0)) || 1;
+  return `<div class="ws-rank">${rows.map(r => { const ok = r.go && UI.canGo(r.go);
+    return `<div class="ws-rank-row${ok ? ' clickable' : ''}"${ok ? ` data-go="${UI.esc(r.go)}" role="link" tabindex="0"` : ''}><div class="ws-rank-name"><b>${UI.esc(r.label)}</b>${r.sub ? `<span>${UI.esc(r.sub)}</span>` : ''}</div>
+      <div class="ws-rank-track" aria-hidden="true"><span style="width:${Math.round((+r.value || 0) / max * 100)}%"></span></div><div class="ws-rank-val">${UI.esc(r.display ?? UI.num(r.value))}</div></div>`; }).join('')}</div>`;
+};
+/** Report period selector (presets + custom dates), same URL keys as before (?from=&to=). */
+UI.wsPeriod = (page, per) => {
+  const iso = (x) => { const y = new Date(x); y.setMinutes(y.getMinutes() - y.getTimezoneOffset()); return y.toISOString().slice(0, 10); };
+  const now = new Date(), today = iso(now);
+  const presets = [['This month', iso(new Date(now.getFullYear(), now.getMonth(), 1))], ['Last 3 months', iso(new Date(now.getFullYear(), now.getMonth() - 2, 1))],
+    ['Last 6 months', iso(new Date(now.getFullYear(), now.getMonth() - 5, 1))], ['This year', iso(new Date(now.getFullYear(), 0, 1))]];
+  const hit = presets.find(([, f]) => per.from === f && per.to === today);
+  return `<div class="ws-filters ws-period no-print" role="group" aria-label="Reporting period"><label class="small text-muted" for="wsPeriodSel">Reporting period</label>
+    <select id="wsPeriodSel" class="form-select form-select-sm" data-ws-period>${presets.map(([l, f]) => `<option value="${UI.esc(page + '?' + new URLSearchParams({ from: f, to: today }))}" ${hit && hit[1] === f ? 'selected' : ''}>${l}</option>`).join('')}${hit ? '' : '<option selected value="">Custom dates</option>'}</select>
+    <input type="date" class="form-control form-control-sm" data-gf="from" value="${UI.esc(per.from)}" aria-label="Start date" title="Start date">
+    <input type="date" class="form-control form-control-sm" data-gf="to" value="${UI.esc(per.to)}" aria-label="End date" title="End date">
+    <span class="small text-muted">${UI.date(per.from)} – ${UI.date(per.to)}</span></div>`;
+};
+UI.bindPeriod = (root) => root.querySelector('[data-ws-period]')?.addEventListener('change', (e) => { if (e.target.value) UI.goTo(e.target.value); });
 UI.operationsLabel = label => {
   const role=App.me?.user?.role;if(!['operations_head','car_carrier_dispatcher','container_wingvan_dispatcher'].includes(role))return label;
   const names={'Trip Management':'Trips','Dispatcher Monitoring':'Dispatch Monitoring','Trip Fund Approvals':'Fund Approvals','Truck Masterlist':'Trucks','Truck Master List':'Trucks','Driver & Helper Masterlist':'Drivers & Helpers','Client Masterlist':'Clients','Incidents & Maintenance':'Incidents & Repairs','Plate Number':'Plate No.','Plate number':'Plate No.','Personnel Name':'Name','Personnel Role':'Role','Permanent Truck':'Fixed Truck','Current Availability':'Availability','Operational Status':'Status','View Details':'View','Action Required Summary':'Needs Action','Workflow Progress Timeline':'Progress','Eligibility & Readiness Panel':'Readiness'};
@@ -652,6 +918,18 @@ UI.statusStrip = (items) => `<div class="metric-strip metric-strip-icons">${(ite
     <div class="metric-content"><div class="metric-label">${UI.esc(UI.operationsLabel(c.label))}</div>
     <div class="metric-value">${c.format === 'money' ? UI.money(c.value) : UI.esc(typeof c.value === 'number' ? UI.num(c.value, 2) : c.value)}</div>
     ${c.note ? `<div class="metric-note">${UI.esc(c.note)}</div>` : ''}</div></div>`; }).join('')}</div>`;
+/**
+ * STAGE_A_WORKSPACE_UI — KPI tiles for the role workspaces (Motorpool, Purchasing).
+ * items: [{label, value, note, icon: 'bi-...', tone: amber|blue|green|red|gray, go: 'page?x=y'}]
+ * A tile is a link only when the user may open its page (UI.canGo); otherwise it is plain, non-interactive text.
+ */
+UI.kpiTiles = (items, cls = '') => `<div class="kpi-tiles${cls ? ' ' + UI.esc(cls) : ''}">${(items || []).map(c => { const go = c.go && UI.canGo(c.go);
+  return `<div class="kpi-tile tone-${UI.esc(c.tone || 'gray')}${go ? ' clickable' : ''}"${go ? ` data-go="${UI.esc(c.go)}" role="link" tabindex="0" aria-label="${UI.esc(c.label)}: ${UI.esc(c.value)}"` : ''}>
+    <div class="kpi-icon"><i class="bi ${UI.esc(c.icon || 'bi-circle')}"></i></div>
+    <div class="kpi-body"><div class="kpi-value">${UI.esc(c.value)}</div><div class="kpi-label">${UI.esc(c.label)}</div>${c.note ? `<div class="kpi-note">${UI.esc(c.note)}</div>` : ''}</div>
+    ${go ? '<i class="bi bi-chevron-right kpi-go" aria-hidden="true"></i>' : ''}</div>`; }).join('')}</div>`;
+/** Back link to a workspace page; empty when the user cannot open that page. */
+UI.crumb = (page, label) => UI.canGo(page) ? `<nav class="ws-crumb" aria-label="Back"><button type="button" class="ws-crumb-link" data-go="${UI.esc(page)}"><i class="bi bi-arrow-left"></i> ${UI.esc(label)}</button></nav>` : '';
 /** Dashboard / report cards use the same metric strip. */
 UI.cards = (cards) => UI.statusStrip((cards || []).map(c => ({ label: c.label, value: c.value, note: c.hint, icon: c.icon, color: c.color && c.color !== 'gray' ? c.color : '', go: c.page, format: c.format })));
 UI.goParts = (spec) => {
@@ -712,6 +990,9 @@ UI.overviewColumns = (columns, opts = {}) => {
 UI.overviewActions = (id, row) => {
   const t = UI._tables[id];
   let html = t.opts.actions ? (t.opts.actions(row) || '') : '';
+  // STAGE_B_WORKSPACE_UI: tables that pass directActions show their (already role/state-filtered) icon buttons in the row,
+  // instead of collapsing them behind a "Manage" chooser.
+  if (t.opts.directActions) return `<div class="row-icons">${html}</div>`;
   const hasView = /data-act=["'](?:view|trip|details|open)["']/i.test(html);
   if (t.columns.length < t.allColumns.length && !hasView) html += '<button type="button" class="btn btn-sm btn-outline-primary" data-fleet-details><i class="bi bi-eye" aria-hidden="true"></i> View</button>';
   const n = (html.match(/<button\b/gi) || []).length;
@@ -730,6 +1011,11 @@ UI.table = (columns, rows, opts = {}) => {
   const visibleColumns = UI.overviewColumns(columns, opts);
   UI._tables[id] = { columns: visibleColumns, allColumns: columns, hasActions: !!opts.actions || (!opts.plain && visibleColumns.length < columns.length), rows: rows || [], opts, limit: opts.limit || (opts.plain ? 8 : 15), page: 0, filter: '' };
   if (opts.plain) return `<div class="plain-table"><div class="table-wrap" data-tbody="${id}"></div><div class="table-pager no-print" data-tpager="${id}"></div></div>`;
+  if (UI.refPage()) {   // REF_FIDELITY_V1: search + Reset toolbar, then the bordered table (reference list layout)
+    return `<div class="ref-list"><div class="ref-toolbar no-print"><div class="table-search ref-search"><i class="bi bi-search" aria-hidden="true"></i><input class="form-control" type="search" placeholder="Search records..." aria-label="Search records" data-tsearch="${id}"></div>
+      <button type="button" class="btn ref-reset" data-treset="${id}" title="Clear the search, tab and filters">Reset</button><span class="table-count" data-tcount="${id}"></span>${opts.tools || ''}</div>
+      <div class="ref-tablebox"><div class="table-wrap" data-tbody="${id}"></div></div><div class="table-pager no-print" data-tpager="${id}"></div></div>`;
+  }
   const head = `<div class="table-tools">
       <div class="table-search"><i class="bi bi-search"></i><input class="form-control" type="search" placeholder="Search this list" aria-label="Search this list" data-tsearch="${id}"></div>
       <div class="table-tools-right"><span class="table-count" data-tcount="${id}"></span>${opts.tools || ''}</div></div>`;
@@ -815,8 +1101,10 @@ UI.drawTable = (id) => {
   const first = t.page * t.limit, shown = rows.slice(first, first + t.limit);
   const num = (f) => f === 'money' || f === 'num';
   const cellClass = (f) => f === 'money' ? 'num money-col' : f === 'num' ? 'count-col' : (f === 'badge' || f === 'yes') ? 'status-col' : '';
-  box.innerHTML = `<table class="data-table${t.opts.rowClick ? ' clickable' : ''}"><thead><tr>${t.columns.map(([l, , f]) => `<th class="${cellClass(f)}">${UI.esc(UI.columnLabel(l, f))}</th>`).join('')}${t.hasActions ? '<th class="actions-col"><span class="visually-hidden">Actions</span></th>' : ''}</tr></thead>
-    <tbody>${shown.map((r) => `<tr data-ri="${t.rows.indexOf(r)}">${t.columns.map(([, k, f]) => `<td class="${cellClass(f)}">${UI.fmt(f, r[k], r)}</td>`).join('')}${t.hasActions ? `<td class="actions-col"><div class="row-actions" data-row="${id}:${t.rows.indexOf(r)}">${UI.overviewActions(id,r)}</div></td>` : ''}</tr>`).join('')}</tbody></table>`;
+  // COMPACT_TABLES_V1: on reference pages, columns hug their content; only long-text columns (cell-clip / cell-clamp) take the spare width.
+  const grow = UI.refPage() ? t.columns.map(([, k, f]) => typeof f === 'function' && shown.some(r => /cell-cl(?:ip|amp)/.test(String(f(r[k], r) || '')))) : [];
+  box.innerHTML = `<table class="data-table${t.opts.rowClick ? ' clickable' : ''}"><thead><tr>${t.columns.map(([l, , f], i) => `<th class="${cellClass(f)}${grow[i] ? ' col-grow' : ''}">${UI.esc(UI.columnLabel(l, f))}</th>`).join('')}${t.hasActions ? '<th class="actions-col"><span class="visually-hidden">Actions</span></th>' : ''}</tr></thead>
+    <tbody>${shown.map((r) => `<tr data-ri="${t.rows.indexOf(r)}">${t.columns.map(([, k, f], i) => `<td class="${cellClass(f)}${grow[i] ? ' col-grow' : ''}">${UI.fmt(f, r[k], r)}</td>`).join('')}${t.hasActions ? `<td class="actions-col"><div class="row-actions" data-row="${id}:${t.rows.indexOf(r)}">${UI.overviewActions(id,r)}</div></td>` : ''}</tr>`).join('')}</tbody></table>`;
   if(pager&&t.opts.dsServerPaged){pager.innerHTML='';}
   else if(pager&&(!t.opts.plain||(UI.role('operations_head')&&box.closest('.app-drawer')&&!box.closest('form')&&!t.opts.dsServerPaged))&&(UI.role('operations_head')||UI.isDispatcher())){
     pager.innerHTML=UI.recordPager({total:rows.length,page:t.page+1,pages:Math.max(1,pages),pageSize:t.limit,previous:'data-tpg="'+(t.page-1)+'"',next:'data-tpg="'+(t.page+1)+'"'});
@@ -946,6 +1234,9 @@ UI.activate = (root) => {
   });
   UI.mountMasterlistQuickToolbar(root);
 };
+/** STAGE_B_WORKSPACE_UI — compact icon action for table rows: tooltip + accessible label, same data-act contract as UI.btn. */
+UI.ibtn = (act, label, icon, cls = 'outline-secondary') =>
+  `<button type="button" class="btn btn-sm btn-${cls} icon-act" data-act="${UI.esc(act)}" title="${UI.esc(label)}" aria-label="${UI.esc(label)}"><i class="bi ${UI.esc(icon)}" aria-hidden="true"></i></button>`;
 UI.btn = (act, label, cls = 'outline-secondary', icon = '') => {
   const text = UI.operationsLabel(label === 'Open' ? 'View' : label === 'Open trip' ? 'View trip' : label);
   const isView = act === 'view' || (act === 'trip' && text === 'View trip');
@@ -1422,6 +1713,8 @@ UI.list = (arr) => (arr || []).map(x => [x, x]);
  */
 UI.takeQuery = (ctx, ...keys) => {
   const out = {}; let changed = false;
+  // WS_NAV_STATE_V1: one-shot keys already taken out by route() on workspace pages.
+  keys.forEach(k => { if (ctx.once && ctx.once[k] !== undefined) { out[k] = ctx.once[k]; delete ctx.once[k]; } });
   keys.forEach(k => { if (ctx.query[k] !== undefined) { out[k] = ctx.query[k]; delete ctx.query[k]; changed = true; } });
   if (changed) {
     const qs = new URLSearchParams(ctx.query).toString();
@@ -1462,6 +1755,32 @@ UI.filterModal = (ctx, fields, opts = {}) => {
   return `<div class="filter-summary ui-filter-toolbar" data-fid="${id}"><button type="button" class="btn btn-sm btn-outline-secondary" data-fopen><i class="bi bi-funnel"></i> Filter${active.length ? ` <span class="badge bg-warning text-dark">${active.length}</span>` : ''}</button>
     ${active.length ? active.map(k => `<span class="filter-chip">${UI.esc(label(k))}</span>`).join('') + '<button type="button" class="btn btn-link btn-sm p-0 ms-1" data-fclear>Reset</button>' : `<span>${UI.esc(opts.hint || 'Showing all records.')}</span>`}</div>`;
 };
+
+/**
+ * STAGE_B_WORKSPACE_UI — general filters shown directly on the page (Truck Masterlist style): selects and dates that
+ * change the page URL query at once, plus Reset. fields: [{name, label, options: [[value, label]] | [value], type: 'select'|'date'}].
+ * Options must come from real loaded data. Works together with status tabs and the table search.
+ */
+UI.generalFilters = (ctx, fields) => {
+  const keys = fields.map(f => f.name), active = keys.filter(k => ctx.query[k]);
+  const ctl = (f) => {
+    const v = ctx.query[f.name] ?? '';
+    if (f.type === 'date') return `<input type="date" class="form-control form-control-sm" data-gf="${UI.esc(f.name)}" value="${UI.esc(v)}" aria-label="${UI.esc(f.label)}" title="${UI.esc(f.label)}">`;
+    const opts = (f.options || []).map(o => Array.isArray(o) ? o : [o, o]);
+    return `<select class="form-select form-select-sm" data-gf="${UI.esc(f.name)}" aria-label="${UI.esc(f.label)}"><option value="">${UI.esc(f.all || 'All ' + f.label.toLowerCase())}</option>
+      ${opts.map(([val, lab]) => `<option value="${UI.esc(val)}" ${String(val) === String(v) ? 'selected' : ''}>${UI.esc(lab)}</option>`).join('')}</select>`;
+  };
+  return `<div class="ws-filters no-print" role="group" aria-label="Filters">${fields.map(ctl).join('')}${active.length ? `<button type="button" class="btn btn-link btn-sm ws-filter-reset" data-gf-reset="${UI.esc(keys.join(','))}"><i class="bi bi-x-circle"></i> Reset filters</button>` : ''}</div>`;
+};
+document.addEventListener('change', (e) => {
+  const c = e.target.closest('[data-gf]'); if (!c || !App.current) return;
+  const q = { ...App.current.query }; if (c.value) q[c.dataset.gf] = c.value; else delete q[c.dataset.gf];
+  App.go(App.current.page, q);
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-gf-reset]'); if (!b || !App.current) return;
+  const q = { ...App.current.query }; b.dataset.gfReset.split(',').forEach(k => delete q[k]); App.go(App.current.page, q);
+});
 
 UI._filters = {};
 // One listener for every filter bar (works even when the bar is drawn later inside a tab).
@@ -1731,7 +2050,8 @@ UI.signatureModal = () => {
   const savePref = (value) => {
     try { localStorage.setItem(prefKey(), value); } catch (_) { /* private browsing */ }
   };
-  const eligible = (opts) => !opts.plain && opts.viewSwitch !== false && App.current?.page !== 'dashboard';
+  // WS_DESIGN_V1: Maintenance / Accounting workspace pages always show one table (no manual List/Card switch).
+  const eligible = (opts) => !opts.plain && opts.viewSwitch !== false && App.current?.page !== 'dashboard' && !UI.WS_PAGES.has(App.current?.page) && !UI.refPage();
 
   UI.table = (columns, rows, opts = {}) => {
     if (!eligible(opts)) return oldTable(columns, rows, opts);
@@ -1884,3 +2204,16 @@ if (typeof Chart !== 'undefined') {
   Chart.defaults.color = '#57606a';
   Chart.defaults.borderColor = '#e6e8eb';
 }
+
+/* REF_FIDELITY_V1 — Reset on reference lists clears the search and returns to the page's default tab and filters;
+   Escape closes an open record drawer (as in the reference), unless a dialog is open on top of it. */
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-treset]'); if (!b || !App.current) return;
+  const input = document.querySelector(`[data-tsearch="${b.dataset.treset}"]`);
+  if (input && input.value) { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); }
+  if (Object.keys(App.current.query || {}).length) App.go(App.current.page, {});
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || document.querySelector('.modal.show')) return;
+  if (document.querySelector('.offcanvas.app-drawer.show')) UI.closeDrawer();
+});

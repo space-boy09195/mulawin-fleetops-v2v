@@ -131,9 +131,9 @@ if (isset($_GET['api'])) {
 // ---------------- HTML shell ----------------
 // Each module script is separate: if one file fails, the other pages still work.
 // Screen files naka-grupo ayon sa department (public/assets/js/modules/<department>/<file>.js).
-$jsModules = ['general/dashboard', 'operations/trips', 'operations/trip-planner', 'operations/fleet', 'operations/clients', 'operations/routes', 'maintenance/mechanics', 'maintenance/maintenance',
+$jsModules = ['general/dashboard', 'operations/trips', 'operations/trip-planner', 'operations/fleet', 'operations/clients', 'operations/routes', 'maintenance/mechanics', 'maintenance/maintenance', 'maintenance/history',
               'maintenance/purchasing', 'accounting/funds', 'accounting/billing', 'accounting/finance', 'general/documents', 'general/reports',
-              'general/notifications', 'administration/admin', 'administration/head-management', 'operations/ops-head', 'operations/dispatcher-monitoring', 'operations/trip-approvals', 'operations/dispatcher', 'operations/ops-reports', 'operations/dispatcher-turnover'];
+              'general/notifications', 'administration/admin', 'administration/head-management', 'administration/audit', 'administration/oversight', 'operations/ops-head', 'operations/dispatcher-monitoring', 'operations/trip-approvals', 'operations/dispatcher', 'operations/ops-reports', 'operations/dispatcher-turnover'];
 $v = static fn(string $f): string => is_file(__DIR__ . '/' . $f) ? (string)filemtime(__DIR__ . '/' . $f) : '1';
 ?><!doctype html>
 <html lang="en">
@@ -149,6 +149,7 @@ $v = static fn(string $f): string => is_file(__DIR__ . '/' . $f) ? (string)filem
   <link rel="stylesheet" href="assets/css/layout.css?v=<?= $v('assets/css/layout.css') ?>">
   <link rel="stylesheet" href="assets/css/login.css?v=<?= $v('assets/css/login.css') ?>">
   <link rel="stylesheet" href="assets/css/app.css?v=<?= $v('assets/css/app.css') ?>">
+  <link rel="stylesheet" href="assets/css/workspace.css?v=<?= $v('assets/css/workspace.css') ?>">
   <link rel="stylesheet" href="assets/css/ops-head.css?v=<?= $v('assets/css/ops-head.css') ?>">
   <link rel="stylesheet" href="assets/css/records.css?v=<?= $v('assets/css/records.css') ?>">
   <link rel="stylesheet" href="assets/css/dispatcher.css?v=<?= $v('assets/css/dispatcher.css') ?>">

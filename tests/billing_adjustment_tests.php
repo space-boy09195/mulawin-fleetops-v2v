@@ -71,7 +71,7 @@ $n = 0;
 /** A completed trip with a billing record in $status (base = 20 km x PHP 50 = PHP 1,000). */
 $billing = function (string $status = 'For Billing', bool $docs = true) use ($p, $ops, $cid, &$n): int {
     $n++;
-    $t = (int)Trips::action($ops, 'create', ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "P$n", 'delivery_point' => "D$n",
+    $t = (int)test_create_planned_trip($ops, ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => "P$n", 'delivery_point' => "D$n",
         'scheduled_at' => date('Y-m-d\TH:i', time() + 3600), 'distance_km' => '20'])['trip_id'];
     $tripStatus = $status === 'Ongoing' ? 'In Transit' : 'Completed';
     run($p, "UPDATE trips SET status=?, dispatched_at=DATE_SUB(NOW(), INTERVAL 5 HOUR), completed_at=IF(?='Completed', DATE_SUB(NOW(), INTERVAL 1 HOUR), NULL) WHERE id=?", [$tripStatus, $tripStatus, $t]);
@@ -112,7 +112,11 @@ if (!is_file($baseSchema) || !is_file($baseExt)) {
         test_import($up, (string)file_get_contents($baseSchema));
         test_import($up, (string)file_get_contents($baseExt));
         foreach (test_migrations_from('2026-11-08_08_attendance') as $m) if (strcmp($m, MIG) < 0 && !one($up, 'SELECT id FROM schema_migrations WHERE id=?', [$m])) test_import($up, test_sql("database/migrations/$m.sql"));
-        foreach (['users', 'clients', 'client_rates', 'trips', 'billings'] as $tbl) $up->exec("INSERT INTO `$UPGRADE`.$tbl SELECT * FROM `$FRESH`.$tbl");
+        // Later migrations (e.g. kenneth 10/11 on trips) add columns the pre-09 schema lacks: copy the shared columns only.
+        foreach (['users', 'clients', 'client_rates', 'client_routes', 'trips', 'billings'] as $tbl) {
+            $cols = implode(',', array_map(fn($c) => '`' . $c . '`', array_column(many($up, 'SELECT a.column_name AS c FROM information_schema.columns a JOIN information_schema.columns b ON b.table_name=a.table_name AND b.column_name=a.column_name AND b.table_schema=? WHERE a.table_schema=? AND a.table_name=? AND a.extra NOT LIKE "%GENERATED%" ORDER BY a.ordinal_position', [$FRESH, $UPGRADE, $tbl]), 'c')));
+            $up->exec("INSERT INTO `$UPGRADE`.$tbl ($cols) SELECT $cols FROM `$FRESH`.$tbl");
+        }
         foreach ($oldCharges as [$bid, $desc, $amt]) {
             insert($up, 'billing_charges', ['billing_id' => $bid, 'description' => $desc, 'amount' => $amt, 'added_by' => $bil['id']]);
             $up->prepare('UPDATE billings SET charges_total=charges_total+?, total_amount=total_amount+? WHERE id=?')->execute([$amt, $amt, $bid]);
@@ -125,6 +129,8 @@ if (!is_file($baseSchema) || !is_file($baseExt)) {
     $oldCols = 'id, billing_id, description, amount, added_by, created_at';
     $fa = test_fingerprint($p, $FRESH);
     $sameAsFresh = function (PDO $c, string $label) use ($fa, $UPGRADE): void {
+        // Later migrations (other features) are part of a fresh install: apply them first (each only once).
+        foreach (test_migrations_from(MIG) as $later) if (strcmp($later, MIG) > 0 && !one($c, 'SELECT id FROM schema_migrations WHERE id=?', [$later])) test_import($c, test_sql("database/migrations/$later.sql"));
         $fb = test_fingerprint($c, $UPGRADE);
         foreach ($fa as $k => $v) ok($v === $fb[$k], "$label: identical $k to a fresh install", json_encode([array_values(array_diff($v, $fb[$k])), array_values(array_diff($fb[$k], $v))]));
     };
@@ -415,10 +421,12 @@ section('K. Trip operations do not depend on billing approvals');
 $src = (string)file_get_contents(dirname(__DIR__) . '/backend/Modules/Operations/Trips.php') . file_get_contents(dirname(__DIR__) . '/backend/Core/BillingDraft.php');
 ok(!str_contains($src, 'billing_charges') && !str_contains($src, 'Pending Approval\' AND billing'), 'Trips and BillingDraft never read billing_charges (planning, dispatch, completion unaffected)');
 $pend = (int)$act($bil, 'charge_add', ['billing_id' => $b1, 'description' => 'Pending during ops', 'amount' => '10'])['charge_id'];
-$t9 = (int)Trips::action($ops, 'create', ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => 'PX', 'delivery_point' => 'DX', 'scheduled_at' => date('Y-m-d\TH:i', time() + 3600), 'distance_km' => '20'])['trip_id'];
+$t9 = (int)test_create_planned_trip($ops, ['client_id' => $cid, 'truck_type' => 'Wing Van', 'pickup_point' => 'PX', 'delivery_point' => 'DX', 'scheduled_at' => date('Y-m-d\TH:i', time() + 3600), 'distance_km' => '20'])['trip_id'];
 ok($t9 > 0 && in_array(one($p, 'SELECT status FROM trips WHERE id=?', [$t9])['status'], ['Pre-Assigned', 'Awaiting Resources'], true), 'trip planning works while billing requests are pending (normal planning status)');
 BillingDraft::createFor($p, one($p, 'SELECT * FROM trips WHERE id=?', [$t9]));
-ok(one($p, 'SELECT total_amount FROM billings WHERE trip_id=?', [$t9])['total_amount'] === '1000.00', 'billing draft at dispatch unaffected (base only)');
+core('TripPricing'); $q9 = TripPricing::quote($p, one($p, 'SELECT * FROM trips WHERE id=?', [$t9]), date('Y-m-d H:i:s')); $base9 = (string)($q9['total'] ?? $q9['fixed'] ?? '0.00');   // kenneth: fixed-route pricing
+$b9 = one($p, 'SELECT total_amount, charges_total FROM billings WHERE trip_id=?', [$t9]);
+ok((float)$b9['total_amount'] === (float)$base9 && (float)$b9['charges_total'] === 0.0, 'billing draft at dispatch unaffected (base only)', json_encode([$b9, $base9]));
 ok($C($pend)['status'] === 'Pending Approval', 'pending request untouched by other trip operations');
 
 // ---------------------------------------------------------------------

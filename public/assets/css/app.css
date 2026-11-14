@@ -2034,6 +2034,151 @@ button.docfm-folder:focus-visible {
 }
 
 
+/* MAINTENANCE_OVERVIEW_PHASE1_V1 — Maintenance Overview (scoped: .maint-overview and .mo-*) */
+.maint-overview .mo-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.maint-overview .mo-grid .panel { margin-bottom: 16px; }
+.maint-overview .mo-list, .maint-overview .mo-acts { list-style: none; margin: 0; padding: 0; }
+.maint-overview .mo-item { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.maint-overview .mo-item:last-child { border-bottom: 0; }
+.maint-overview .mo-item-main { min-width: 0; flex: 1; }
+.maint-overview .mo-item-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-md); }
+.maint-overview .mo-ref { color: var(--text-3); font-size: var(--fs-sm); }
+.maint-overview .mo-tag { font-size: var(--fs-xs); padding: 1px 7px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); }
+.maint-overview .mo-item-issue { margin-top: 3px; color: var(--text-2); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maint-overview .mo-item-next { margin-top: 5px; font-size: var(--fs-sm); font-weight: 550; }
+.maint-overview .mo-since { font-weight: 400; color: var(--text-3); }
+.maint-overview .mo-item-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.maint-overview .mo-more, .maint-overview .mo-empty { padding: 14px 16px; font-size: var(--fs-sm); color: var(--text-3); }
+.maint-overview .mo-more { border-top: 1px solid var(--border); }
+.maint-overview .mo-quick { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.maint-overview .mo-quick .mo-quick-link { text-align: left; padding: 2px 0; font-size: var(--fs-sm); }
+.maint-overview .mo-act { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.maint-overview .mo-act:last-child { border-bottom: 0; }
+.maint-overview .mo-act.clickable { cursor: pointer; }
+.maint-overview .mo-act.clickable:hover, .maint-overview .mo-act.clickable:focus-visible { background: var(--surface-2); }
+.maint-overview .mo-act-label { font-weight: 600; }
+.maint-overview .mo-act-what { color: var(--text-2); }
+.maint-overview .mo-act-details { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maint-overview .mo-act-when { color: var(--text-3); font-size: var(--fs-xs); margin-top: 2px; }
+@media (max-width: 991.98px) { .maint-overview .mo-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 575.98px) { .maint-overview .mo-item { flex-direction: column; align-items: stretch; } .maint-overview .mo-item-side { flex-direction: row; align-items: center; } }
+/* Repair Management: filter coming from the Overview cards */
+.mo-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: 10px; border-radius: var(--r); background: var(--blue-bg); border: 1px solid var(--blue-bd); font-size: var(--fs-sm); }
+.mo-filter-bar a { margin-left: auto; }
+
+/* STAGE_A_WORKSPACE_UI — role workspace components (KPI tiles, quick actions, status bars, truck list, back link).
+   Scoped class names, existing FleetOps tokens only. Used by the Motorpool workspace (and later Purchasing). */
+.kpi-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.kpi-tile { --tone: var(--gray); --tone-bg: var(--gray-bg); display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 16px; background: var(--surface);
+  border: 1px solid var(--border); border-left: 4px solid var(--tone); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); position: relative; min-width: 0; }
+.kpi-tile.tone-green { --tone: var(--green); --tone-bg: var(--green-bg); } .kpi-tile.tone-blue { --tone: var(--blue); --tone-bg: var(--blue-bg); }
+.kpi-tile.tone-amber { --tone: var(--amber); --tone-bg: var(--amber-bg); } .kpi-tile.tone-red { --tone: var(--red); --tone-bg: var(--red-bg); }
+.kpi-tile .kpi-icon { flex: none; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--tone-bg); color: var(--tone); font-size: 19px; }
+.kpi-tile .kpi-body { min-width: 0; flex: 1; }
+.kpi-tile .kpi-value { font-size: var(--fs-2xl); font-weight: 700; line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums; }
+.kpi-tile .kpi-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); margin-top: 2px; }
+.kpi-tile .kpi-note { font-size: var(--fs-xs); color: var(--text-3); margin-top: 1px; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kpi-tile .kpi-go { color: var(--text-3); flex: none; transition: transform .15s ease; }
+.kpi-tile.clickable { cursor: pointer; transition: box-shadow .15s ease, transform .15s ease; }
+.kpi-tile.clickable:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.kpi-tile.clickable:hover .kpi-go { transform: translateX(2px); color: var(--tone); }
+.kpi-tile.clickable:focus-visible, .ws-bar.clickable:focus-visible, .ws-trucks li:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* Maintenance Overview: compact Quick actions row and internally scrolling list panels (about 3-4 entries visible). */
+.maint-overview .mo-quickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); }
+.maint-overview .mo-quickbar-title { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); margin-right: 4px; }
+.maint-overview .mo-grid { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 12px; }
+.maint-overview .mo-main, .maint-overview .mo-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.maint-overview .mo-grid .panel { margin-bottom: 0; }
+.maint-overview .mo-list.mo-scroll { max-height: 264px; overflow-y: auto; }
+.maint-overview .mo-acts.mo-scroll { max-height: 236px; overflow-y: auto; }
+.maint-overview .ws-trucks.mo-scroll { max-height: 220px; overflow-y: auto; }
+.maint-overview .mo-item { padding: 10px 14px; }
+.maint-overview .mo-act { padding: 8px 14px; }
+.maint-overview .kpi-tiles { gap: 10px; margin-bottom: 12px; }
+.maint-overview .kpi-tile { padding: 10px 12px 10px 14px; }
+
+.ws-bar { padding: 6px 0; } .ws-bar.clickable { cursor: pointer; border-radius: var(--r); } .ws-bar.clickable:hover .ws-bar-top span { color: var(--text); text-decoration: underline; }
+.ws-bar-top { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--text-2); margin-bottom: 4px; }
+.ws-bar-track { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.ws-bar-fill { height: 100%; border-radius: 999px; background: var(--gray); } .ws-bar-fill.tone-green { background: var(--green); } .ws-bar-fill.tone-blue { background: var(--blue); }
+.ws-foot { margin-top: 8px; font-size: var(--fs-xs); color: var(--text-3); }
+
+.ws-trucks { list-style: none; margin: 0; padding: 0; }
+.ws-trucks li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.ws-trucks li:last-child { border-bottom: 0; } .ws-trucks li.clickable { cursor: pointer; } .ws-trucks li.clickable:hover { background: var(--surface-2); }
+
+.ws-crumb { margin: -4px 0 10px; } .ws-crumb-link { border: 0; background: none; padding: 0; color: var(--blue); font-size: var(--fs-sm); cursor: pointer; }
+.ws-crumb-link:hover { text-decoration: underline; }
+@media (max-width: 991.98px) { .maint-overview .mo-grid { grid-template-columns: 1fr; } }
+@media (max-width: 767.98px) { .kpi-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .kpi-tile .kpi-icon { width: 34px; height: 34px; font-size: 16px; }
+  .maint-overview .mo-quickbar .btn { flex: 1 1 calc(50% - 6px); } .maint-overview .mo-quickbar-title { flex-basis: 100%; } }
+@media (max-width: 419.98px) { .kpi-tiles { grid-template-columns: 1fr; } }
+
+/* Mechanic Attendance board cards */
+.mech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.mech-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-top: 3px solid var(--gray-bd); border-radius: var(--r-lg); background: var(--surface); min-width: 0; }
+.mech-card.is-on { border-top-color: var(--green); }
+.mech-card header { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mech-avatar { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); font-weight: 700; font-size: var(--fs-sm); }
+.mech-card.is-on .mech-avatar { background: var(--green-bg); color: var(--green); }
+.mech-id { min-width: 0; } .mech-id b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mech-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.mech-dur { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.mech-job { font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mech-card footer { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; }
+
+/* STAGE_B_WORKSPACE_UI — Maintenance + Accounting pages only (#pageContent.ws-scope; set in core.js route()).
+   Close, content-sized columns with readable 14px text; Operations pages keep their existing table styles. */
+.ws-scope .data-table { width: auto; min-width: 0; max-width: 100%; font-size: 14px; line-height: 1.4; }
+.ws-scope .data-table th { font-size: 13.5px; font-weight: 600; padding: 9px 8px; white-space: nowrap; }
+.ws-scope .data-table td { padding: 9px 8px; height: 42px; }
+.ws-scope .data-table th:first-child, .ws-scope .data-table td:first-child { padding-left: 14px; }
+.ws-scope .data-table th:last-child, .ws-scope .data-table td:last-child { padding-right: 14px; }
+.ws-scope .data-table td.money-col, .ws-scope .data-table td.status-col, .ws-scope .data-table td.count-col { white-space: nowrap; }
+/* Content-sized columns: spare width stays at the end of the row instead of spreading the columns apart. */
+.ws-scope .data-table th.actions-col, .ws-scope .data-table td.actions-col { width: 1%; }
+.ws-scope .plain-table .data-table { width: 100%; font-size: 13.5px; }
+.ws-scope .plain-table .data-table th, .ws-scope .plain-table .data-table td { padding: 7px 8px; height: auto; }
+.cell-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 34ch; overflow-wrap: anywhere; }
+.cell-nowrap { white-space: nowrap; }
+.cell-sub { font-size: 12.5px; color: var(--text-3); }
+/* Direct row actions: compact icon buttons with tooltips (UI.ibtn). */
+.row-icons { display: inline-flex; gap: 4px; align-items: center; justify-content: flex-end; flex-wrap: nowrap; }
+.row-actions .icon-act, .row-icons .icon-act { min-height: 32px; min-width: 32px; padding: 4px 7px; line-height: 1; display: inline-grid; place-items: center; }
+.row-actions .icon-act .bi { font-size: 15px; }
+/* "Waiting for" chip: which role/department has the next step. */
+.wait-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.wait-chip .bi { color: var(--text-3); } .wait-chip.is-you { color: var(--blue); } .wait-chip.is-you .bi { color: var(--blue); }
+.wait-chip.is-done { color: var(--text-3); font-weight: 500; }
+/* General filters shown on the page (selects + reset), Truck Masterlist style. */
+.ws-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; }
+.ws-filters .form-select, .ws-filters .form-control { width: auto; min-width: 150px; max-width: 240px; font-size: 14px; height: 34px; padding-top: 4px; padding-bottom: 4px; }
+.ws-filters .ws-filter-reset { font-size: 13.5px; }
+/* Drawer sections: progress bars and the activity timeline. */
+.qty-bar { display: inline-block; vertical-align: middle; width: 70px; height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-left: 6px; }
+.qty-bar > span { display: block; height: 100%; background: var(--green); }
+.ws-timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--border); }
+.ws-timeline li { position: relative; padding: 0 0 10px 10px; font-size: 13.5px; }
+.ws-timeline li::before { content: ''; position: absolute; left: -20px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--blue); }
+.ws-timeline .tl-when { color: var(--text-3); font-size: 12.5px; }
+.ws-next { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r); background: var(--blue-bg); border: 1px solid var(--blue-bd); font-size: 14px; margin-bottom: 12px; }
+.ws-next .bi { color: var(--blue); font-size: 18px; } .ws-next.is-done { background: var(--surface-2); border-color: var(--border); } .ws-next.is-done .bi { color: var(--green); }
+.ws-budget-meter { height: 10px; border-radius: 999px; background: var(--surface-3); overflow: hidden; display: flex; margin: 8px 0 6px; }
+.ws-budget-meter span { height: 100%; } .ws-budget-meter .m-spent { background: var(--blue); } .ws-budget-meter .m-res { background: var(--amber); }
+.ws-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text-2); }
+.ws-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+@media (max-width: 767.98px) {
+  .ws-scope .data-table { font-size: 14px; }
+  .ws-filters .form-select, .ws-filters .form-control { flex: 1 1 calc(50% - 8px); max-width: none; min-width: 0; }
+  .cell-clamp { max-width: 24ch; }
+}
+/* JOB_HELPER_MECHANICS_V1 — searchable mechanic picker */
+.mech-pick { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r); }
+.mech-pick-row { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 14px; margin: 0; }
+.mech-pick-row:last-child { border-bottom: 0; } .mech-pick-row:hover { background: var(--surface-2); }
+
 
 /* Operations > Client Routes: focused, responsive request modal */
 .modal-dialog.rpm-route-dialog { max-width: min(1120px, calc(100vw - 36px)); width: 100%; }

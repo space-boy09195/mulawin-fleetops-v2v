@@ -168,7 +168,7 @@ final class Fleet {
 
     private static function auditCrewFields(array $values): array {
         $labels = [
-            'full_name' => 'Full name', 'person_type' => 'Crew type', 'duty_shift' => 'Assigned shift',
+            'full_name' => 'Full name', 'person_type' => 'Crew type',
             'license_expiry' => 'License expiry', 'date_hired' => 'Date hired',
         ];
         $out = [];
@@ -322,9 +322,7 @@ final class Fleet {
             'license_expiry' => dateField($d, 'license_expiry', false),
             'date_hired' => dateField($d, 'date_hired', false),
             'notes' => optField($d, 'notes', 255),
-            'duty_shift' => null,
         ];
-        // Permanent personnel shifts are retired; historical values are retained.
         // Every save of a DRIVER needs the license (new records, edits, and a helper changed to driver).
         // Old records without a license are not touched until someone edits them.
         if ($row['person_type'] === 'Driver') must($row['license_number'] !== null && $row['license_expiry'] !== null, "A driver needs the driver's license number and expiry date.");
@@ -335,7 +333,6 @@ final class Fleet {
             if ($id) {
                 $old = one($p, 'SELECT * FROM personnel WHERE id=? FOR UPDATE', [$id]);
                 must((bool)$old, 'Person not found.', 404);
-                $row['duty_shift'] = $old['duty_shift']; // Preserve historical shift metadata; it no longer restricts eligibility.
                 if ($old['person_type'] !== $row['person_type']) {
                     must(!one($p, "SELECT 1 FROM trip_assignments WHERE resource_type='person' AND resource_id=?", [$id]), 'Driver/helper type cannot change while on an active trip.', 409);
                     must(!one($p, 'SELECT id FROM vehicles WHERE assigned_driver_id=? OR assigned_helper_id=?', [$id, $id]), 'Remove this person as the regular driver/helper of a truck first.', 409);
@@ -347,7 +344,6 @@ final class Fleet {
                     self::auditCrewFields($old), self::auditCrewFields($row));
                 return ['id' => $id, 'message' => $row['full_name'] . ' updated.'];
             }
-            if (!hasRole($u, 'admin')) $row['duty_shift'] = null; // Admin assigns shift later.
             $id = insert($p, 'personnel', $row);
             if ($row['person_type'] === 'Driver' && hasRole($u, 'operations_head')) FixedAssignments::forDriver($p, $u, $id, optId($d, 'fixed_truck_id'), optId($d, 'regular_helper_id'));
             auditWithChanges($p, $u['id'], 'Fleet', 'personnel ' . $id, 'driver/helper added', $row['full_name'] . ' (' . $row['person_type'] . ')',

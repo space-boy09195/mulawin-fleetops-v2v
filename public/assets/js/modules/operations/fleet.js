@@ -64,6 +64,7 @@ const FleetUI = {
         extra: v.id ? { id: v.id } : {},
         intro: 'OR/CR and insurance files can be attached later in Truck Details → Documents.',
         submit: v.id ? 'Save Changes' : 'Save Truck',
+        after: v.id ? () => FleetUI.truckDetails(v.id, d) : undefined,
       }
     );
   },
