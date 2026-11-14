@@ -769,6 +769,90 @@ const OpsHead = {
           input.oninput = input.onchange = () => { e.data[input.name] = input.value; update(); };
         });
         const pick = card.querySelector('[name=client_route_id]'), note = card.querySelector('[data-route-state]');
+        // Keep the approved route select as the form's source of truth and
+        // preserve the existing validation/API payload. A searchable, two-line
+        // picker is only a presentation layer over its existing change handler.
+        pick.classList.add('oh-route-native-select');
+        const routePicker = document.createElement('div');
+        routePicker.className = 'oh-approved-route-picker';
+        routePicker.innerHTML = '<button type="button" class="oh-route-picker-toggle" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose approved route"><span class="oh-route-picker-selected"><span>Choose an approved route</span></span><i class="bi bi-chevron-down" aria-hidden="true"></i></button>'
+          + '<div class="oh-route-picker-popover" hidden><div class="oh-route-picker-search"><i class="bi bi-search" aria-hidden="true"></i><input type="search" class="form-control" placeholder="Search route ID or truck type" aria-label="Search approved routes"></div><div class="oh-route-picker-options" role="listbox" aria-label="Approved routes"></div></div>';
+        pick.insertAdjacentElement('afterend', routePicker);
+        const routeToggle = routePicker.querySelector('.oh-route-picker-toggle');
+        const routePopup = routePicker.querySelector('.oh-route-picker-popover');
+        const routeSearch = routePicker.querySelector('input[type=search]');
+        const routeOptions = routePicker.querySelector('.oh-route-picker-options');
+        const closeRoutePicker = () => {
+          routePopup.hidden = true;
+          routeToggle.setAttribute('aria-expanded', 'false');
+          routePicker.classList.remove('is-open');
+        };
+        const renderRouteOptions = () => {
+          const term = routeSearch.value.toLocaleLowerCase().trim();
+          const routes = e.routes.filter(r =>
+            [r.route_ref,r.truck_type,r.origin_label,r.destination_label].some(value => String(value || '').toLocaleLowerCase().includes(term)));
+          routeOptions.replaceChildren();
+          if (!routes.length) {
+            const empty = document.createElement('p');
+            empty.className = 'oh-route-picker-empty';
+            empty.textContent = e.loading ? 'Loading approved routes…' : e.routes.length ? 'No matching approved routes.' : 'No approved routes available.';
+            routeOptions.append(empty);
+            return;
+          }
+          routes.forEach(r => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'oh-route-picker-option';
+            option.setAttribute('role', 'option');
+            option.setAttribute('aria-selected', String(String(r.id) === String(pick.value)));
+            option.innerHTML = '<span class="oh-route-picker-option-text"><strong>' + UI.esc(r.route_ref)
+              + '</strong><small><i class="bi bi-truck" aria-hidden="true"></i>' + UI.esc(r.truck_type || 'Truck type unavailable')
+              + '</small></span><i class="bi bi-check2 oh-route-picker-check" aria-hidden="true"></i>';
+            option.onclick = () => {
+              pick.value = String(r.id);
+              pick.dispatchEvent(new Event('change', { bubbles:true }));
+              closeRoutePicker();
+              routeToggle.focus();
+            };
+            routeOptions.append(option);
+          });
+        };
+        const refreshRoutePicker = () => {
+          const selected = e.routes.find(r => String(r.id) === String(pick.value));
+          routeToggle.querySelector('.oh-route-picker-selected').innerHTML = selected
+            ? '<strong>' + UI.esc(selected.route_ref) + '</strong><small><i class="bi bi-truck" aria-hidden="true"></i>' + UI.esc(selected.truck_type || 'Truck type unavailable') + '</small>'
+            : '<span>' + UI.esc(e.loading ? 'Loading approved routes…' : !e.data.client_id ? 'Choose a client first' : 'Choose an approved route') + '</span>';
+          routeToggle.disabled = pick.disabled;
+          if (routeToggle.disabled) closeRoutePicker();
+          if (!routePopup.hidden) renderRouteOptions();
+        };
+        routeToggle.onclick = () => {
+          if (routeToggle.disabled) return;
+          if (!routePopup.hidden) { closeRoutePicker(); return; }
+          routeSearch.value = '';
+          renderRouteOptions();
+          routePopup.hidden = false;
+          routePicker.classList.add('is-open');
+          routeToggle.setAttribute('aria-expanded', 'true');
+          routeSearch.focus();
+        };
+        routeSearch.oninput = renderRouteOptions;
+        routeSearch.onkeydown = event => {
+          if (event.key === 'Escape') { closeRoutePicker(); routeToggle.focus(); }
+          if (event.key === 'ArrowDown') { event.preventDefault(); routeOptions.querySelector('button')?.focus(); }
+        };
+        routeOptions.onkeydown = event => {
+          const options = [...routeOptions.querySelectorAll('button')];
+          const index = options.indexOf(document.activeElement);
+          if (event.key === 'Escape') { closeRoutePicker(); routeToggle.focus(); }
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            (options[index + (event.key === 'ArrowDown' ? 1 : -1)] || (event.key === 'ArrowDown' ? options[0] : routeSearch))?.focus();
+          }
+        };
+        card.addEventListener('pointerdown', event => {
+          if (!routePicker.contains(event.target)) closeRoutePicker();
+        });
         const truckField = card.querySelector('[name=truck_type]');
         const dispatcher = card.querySelector('[name=dispatcher_assignment]');
         dispatcher.insertAdjacentHTML('afterend',`<div id="dispatcher-error-${e.id}" class="invalid-feedback" data-dispatcher-error hidden>Select an available shift for the selected route.</div><div class="oh-dispatcher-team-note" data-dispatcher-team role="status"></div>`);
@@ -809,6 +893,7 @@ const OpsHead = {
         const fillRoutes = () => {
           pick.innerHTML = '<option value="">Choose an approved route</option>' + e.routes.map(r => `<option value="${+r.id}">${UI.esc(r.route_ref)}</option>`).join('');
           pick.value = e.data.client_route_id || ''; pick.disabled = e.loading || !e.data.client_id;
+          refreshRoutePicker();
           const routeInfo = card.querySelector('[data-approved-rate]');
           const selected = e.route;
           routeInfo.hidden = !selected;
