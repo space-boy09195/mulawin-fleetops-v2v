@@ -1,5 +1,81 @@
 # Luis safe integration candidate — 2026-11-14
 
+## Verification follow-up — current status
+
+**The candidate remains local. No push or target merge was performed. The complete legacy regression gate is not yet cleared.** The initial merge report below is retained as historical evidence; this follow-up supersedes its PHPUnit, navigation, route-service and Operations-timeout findings.
+
+### Findings and corrections
+
+The untouched target (`bb308e9`) was rerun in its separate worktree: **482 tests, 1,247 assertions, seven failures and two warnings**, exactly reproducing the previously recorded baseline. All seven are faulty or stale source assertions; production behavior was not changed to satisfy them:
+
+| Original failure | Cause and correction |
+| --- | --- |
+| Executive financial tables | The test expected the tab variable as the direct second argument. The approved implementation first orders it through `.map(...)`. Assert the same shared component call and tab source without imposing the obsolete call spelling. |
+| Trip/approval shared records | The expected title was the former Approvals & Exception Records, while the approved page uses Management Action Records. |
+| Fuel page authorization | A double-quoted test string interpolated undefined `$u`. Escape the literal variable in the source assertion; the Admin role guard remains required. |
+| Executive report aggregates | The same test error interpolated undefined `$sections`. Assert the actual `reportInsights($sections)` call. |
+| Company command center | The expected PHP array source included literal backslashes before quotes that are not present in the implementation. |
+| Route rate editor | The expected opening HTML literal omitted `>` and required a quote at that position. Assert the actual editor element. |
+| Garage route fallback | The test expected the old message “map unavailable”; the approved UI uses “map not ready.” Geometry/source assertions remain intact. |
+
+After correcting those assertions and adding permission-registry coverage, **PHPUnit passes 483 tests and 1,997 assertions with no warnings**.
+
+The supplementary Admin navigation issue was a genuine integration problem: `Access::canOpen()` authorized the pages, but the browser treated the curated thirteen-item executive sidebar as the entire authorized route registry. Changes:
+
+- `Access::routesFor()` exports only the pages permitted by the existing page policy, retaining executive labels for pages already in the menu.
+- `Data::me()` adds `routes` alongside the unchanged `nav` contract. The forced-password-change response still returns no application routes.
+- The browser router and `UI.canGo()` use that server-derived registry, with a fallback for existing sessions/fixtures that only supply `nav`.
+- The Management Action Center now offers Department Approvals and Department Oversight links. The executive sidebar remains thirteen items, and Luis's departmental record links can reach their authorized screens.
+- Page roles, backend action guards, record scope and department ownership were not broadened. A new unit matrix checks every page for every role, and browser checks load the actual shell/module registry and exercise every authorized route. Unauthorized routes are denied before a page-data request.
+
+The Operations timeout was also a fixture problem. Its catch block did not emit `RESULT`, so an assertion failure became a misleading timeout. The fixture left the Dispatcher role active before testing the Operations Head sidebar, expected old flat links, and supplied an outdated Operations menu containing Client Management. Corrected fixture state, approved menu assertions and completion reporting now give **24 passing checks**. The browser runner can select a single fixture and reports the last status when a fixture truly does not complete.
+
+The Client Routes browser fixture expected a garage road leg without supplying the verified garage setting now required by the application. Supplying an explicitly mocked verified setting restores its **39 passing checks**; no sample garage was added to application screens.
+
+### Route-suite investigation
+
+The original `route_tests.php` suite mixes two contracts. It first enters a rate as Admin, then expects the resulting route/rate to remain Pending Approval, refuses a revision while that rate supposedly waits, and attempts a second approval. The current approved backend activates Admin-entered rates transactionally, so these assumptions cause the recorded baseline failures. Its “manual distance” failure is a status assertion in the same expression; it is not evidence that the distance itself was lost. The withdrawal ownership case likewise runs after the route has already activated, so the status guard correctly returns 409 before the ownership guard.
+
+The legacy pending-decision action is still valid for genuine historical pending records. It must not be used to manufacture a second approval for a newly activated Admin rate. No route business rule was changed.
+
+Added `run_current_route_tests.php` / `current_route_tests.php` to verify the actual contract without destructive database commands. **45 checks passed**, covering request permissions, manual distance, pending-route selection denial, immediate activation, actor/effective dates, wrong-role denials, approved client/type selection, duplicate and unchanged-rate guards, historical revisions, exactly one current rate, event history, read-only department access, genuine legacy pending decisions, and stale/double decisions. No trips or financial records are created by this route test.
+
+The runner uses the existing isolation helper's **create-only mode**: a new uniquely named owned database is required; an existing database cannot be replaced, and database-drop cleanup is disabled. It ran on a separately initialized QA server on port 33383 after verifying its actual data directory and database inventory. No operational database was present. The QA server was shut down gracefully, with its fixture database retained. No DROP, TRUNCATE, reset, or operational migration was executed by this follow-up. Initial attempts to restart the old QA server were unavailable; they were not counted as successful tests.
+
+The old route suite was **not rerun** under the latest no-destructive-command restriction: its migration/rollback/concurrency launcher performs database resets and SQL drops. Its previous failing result remains recorded rather than being relabeled PASS. The new create-only suite verifies the current service flow, not every old concurrency/recovery case.
+
+### Current executed results
+
+| Check | Result |
+| --- | --- |
+| Untouched target PHPUnit | FAIL: same seven failures/two warnings, reproduced this follow-up. |
+| Candidate PHPUnit | PASS: 483 tests, 1,997 assertions, zero warnings. |
+| Affected syntax | PASS: seven PHP and four JavaScript/CJS files. |
+| `node tests/run_luis_review_browser.cjs` | PASS: 333 checks using the real PHP permission registry and real browser modules with mocked page data. |
+| `operations_ui.html` | PASS: 24 checks; completion marker now reports failures accurately. |
+| `routes_ui.html` | PASS: 39 checks with actual form, distance widget and Leaflet, mocked API/tile services. |
+| `--components-only` | PASS: 60 checks and three viewport checks (390/820/1366). Includes Maintenance drawer controls/sections, role-specific Purchasing payment visibility, Billing documents/actions, Finance payment values/receipt, read-only denials and Audit details. |
+| `run_current_route_tests.php` | PASS: 45 create-only database service checks. |
+| Full `--fixtures-only` | FAIL: Operations timeout is gone; three other legacy fixtures remain failing. The Routes fixture initially also failed in that run and then passed after the verified-garage fixture correction. |
+| Original destructive route/migration runners | NOT RERUN this follow-up. Previous results remain historical. |
+| Live operational schema and authenticated application | NOT VERIFIED; no connection to `mulawin_v2`. |
+
+The new browser workflow check exercises the real current `OpsHead.planner`, not the older generic planner fallback: two clients with independent Day/Night Dispatcher accounts, route-derived truck types, quantity expansion into three records, review without writes, duplicate-click protection, no invented truck/crew assignments, unique idempotency keys, retry of only the failed row with its original key, no selectable route for a client without approved routes, and Dispatcher creation denial. The separate Dispatcher fixture passed 314 checks in the full run. Luis's fresh backend checks from the initial merge (1,214 checks) were not repeated through destructive launchers; the current UI/component and authorization checks supplement that evidence.
+
+### Remaining blockers and review recommendation
+
+Three legacy browser fixtures still require contract updates; they have not passed and must not be counted as current workflow verification:
+
+- `ops_head_ui.html`: omits current shared record scripts and assumes the retired inline, three-numbered-section planner. The current Add Trip modal/compact planner is exercised by the new 333-check fixture.
+- `dispatcher_monitoring_ui.html`: omits current shared record scripts and expects earlier group/history/table selectors. Its first old-router assertion fails.
+- `trip_approvals_ui.html`: expects the former flat sidebar groups instead of approved collapsible groups; stops at that source/UI contract mismatch.
+
+The existing application files and those fixtures' original missing dependencies/layout assumptions predate this follow-up. They are not proof of a production regression, but the full legacy fixture gate still reports FAIL. Keep them distinct from the passing current-behavior checks. The old route suite's pending-rate/concurrency/recovery contract also needs a separate, deliberate update; do not weaken the application to make it pass.
+
+**Recommendation: hold the push under the existing all-required-regressions-pass rule.** The supplementary navigation regression is fixed and current tested workflows pass, but full legacy browser/route coverage is not completely reconciled. There is no current authorization to push in this follow-up. Keep all changes on `integration/luis-safe-merge-20261114`; target and `main` remain unchanged. Operational schema deployment remains a separately authorized activity, not part of this candidate verification.
+
+## Initial merge report (historical)
+
 ## Outcome and branch safety
 
 **BLOCKED: local candidate only. No branch was pushed and no pull request was created.**

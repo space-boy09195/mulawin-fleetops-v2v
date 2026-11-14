@@ -26,7 +26,7 @@ final class Data {
         $u['has_signature'] = (bool)(one(db(), 'SELECT signature_document_id FROM users WHERE id=?', [$u['id']])['signature_document_id'] ?? null);
         return [
             'ok' => true, 'user' => $u, 'csrf' => $_SESSION['csrf'] ?? '',
-            'nav' => Access::navFor($u), 'sections' => Access::SECTIONS,
+            'nav' => Access::navFor($u), 'routes' => Access::routesFor($u), 'sections' => Access::SECTIONS,
             'notifications' => $bell['items'], 'unread' => $bell['unread'], 'activeNotifications' => $bell['active'],
             'map' => self::mapConfig(),
             'company' => ['name' => envValue('COMPANY_NAME', 'R P MULAWIN TRUCKING SERVICE'),

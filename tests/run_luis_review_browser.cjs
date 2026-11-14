@@ -1,0 +1,21 @@
+/* Database-free verification using the real PHP permission registry and real browser modules. */
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const {spawnSync} = require('node:child_process');
+const root = path.resolve(__dirname, '..');
+const php = 'C:/xampp/php/php.exe';
+const code = `require 'tests/bootstrap.php'; core('Access'); $out=['roles'=>ROLE_LABELS,'truckTypes'=>TRUCK_TYPES,'users'=>[]]; foreach(array_keys(ROLE_LABELS) as $role) $out['users'][$role]=['nav'=>Access::navFor(['id'=>1,'role'=>$role]),'routes'=>Access::routesFor(['id'=>1,'role'=>$role])]; echo json_encode($out,JSON_THROW_ON_ERROR);`;
+const result = spawnSync(php, ['-r', code], {cwd:root, encoding:'utf8', windowsHide:true});
+if (result.status !== 0) throw new Error('Safe permission export failed: '+result.stderr);
+const data = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
+const index = fs.readFileSync(path.join(root,'public/index.php'),'utf8');
+const list = index.match(/\$jsModules\s*=\s*\[([\s\S]*?)\];/);
+if (!list) throw new Error('Module registry missing');
+data.modules = [...list[1].matchAll(/'([^']+)'/g)].map(m=>m[1]);
+const reports = path.join(__dirname,'reports');
+fs.mkdirSync(reports,{recursive:true});
+fs.writeFileSync(path.join(reports,'luis-review-fixture.js'),'window.FleetReviewFixture='+JSON.stringify(data)+';\n');
+const run = spawnSync(process.execPath,[path.join(__dirname,'run_ops_head_browser.cjs'),'--fixture=luis_review_ui.html'],{cwd:root,encoding:'utf8',windowsHide:true});
+fs.writeFileSync(path.join(reports,'luis-review-browser.txt'),run.stdout+run.stderr);
+process.stdout.write(run.stdout); process.stderr.write(run.stderr); process.exitCode=run.status ?? 1;

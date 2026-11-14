@@ -224,6 +224,18 @@ final class Access {
         return $out;
     }
 
+    /** Authorized deep links are independent of the role's curated sidebar. */
+    public static function routesFor(array $u): array {
+        $routes = [];
+        foreach (self::pages() as $id => [$label, $icon, $section, $module, $js, $roles]) {
+            if (self::canOpen($u, $id))
+                $routes[$id] = ['id'=>$id, 'label'=>$label, 'icon'=>$icon, 'section'=>$section, 'js'=>$js];
+        }
+        // Keep the approved role-specific labels on pages already in the menu.
+        foreach (self::navFor($u) as $item) $routes[$item['id']] = $item;
+        return array_values($routes);
+    }
+
     public static function canOpen(array $u, string $page): bool {
         $p = self::pages()[$page] ?? null;
         return $p !== null && in_array($u['role'], $p[5], true);

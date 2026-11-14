@@ -32,7 +32,7 @@
     if(action==='Routes.request')return {route_id:99,message:'Route request sent for billing rate entry.'};
     throw new Error('Unexpected API '+action);
   };
-  const data={clients:[{id:1,company_name:'Fixture Client',status:'Active'}],truckTypes:App.me.truckTypes,routes:[],maxDistance:3000,routing:true,me:1,can:{request:true}};
+  const data={clients:[{id:1,company_name:'Fixture Client',status:'Active'}],truckTypes:App.me.truckTypes,routes:[],maxDistance:3000,routing:true,me:1,can:{request:true},garage:{value_json:JSON.stringify({lat:14.126449,lng:121.070384})}};
   const open=(options={},extra={})=>{RouteUI.request({...data,filterClient:1,filterType:'Wing Van',...extra},options);const modal=[...document.querySelectorAll('.modal')].at(-1);return {modal,form:modal.querySelector('form'),map:maps.at(-1)};};
   const field=(form,name)=>form.querySelector('[name='+name+']');
   const set=(form,name,value)=>{const input=field(form,name);input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));};

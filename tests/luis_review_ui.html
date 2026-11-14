@@ -1,0 +1,84 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Luis integration behavior checks</title>
+<link rel="stylesheet" href="../public/assets/vendor/bootstrap/css/bootstrap.min.css">
+<div id="app"></div><pre id="results">RUNNING</pre><div id="toastZone"></div>
+<script src="../public/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="../public/assets/js/core.js"></script><script src="../public/assets/js/components/records.js"></script><script src="../public/assets/js/components/forms.js"></script><script src="../public/assets/js/map.js"></script>
+<script src="reports/luis-review-fixture.js"></script>
+<script>
+(async()=>{
+ const checks=[],requests=[],calls=[],fixture=window.FleetReviewFixture;
+ const assert=(ok,label)=>{if(!ok)throw new Error(label);checks.push('PASS '+label);};
+ const pause=()=>new Promise(resolve=>setTimeout(resolve,40));
+ try {
+  for(const module of fixture.modules) await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='../public/assets/js/modules/'+module+'.js';script.onload=resolve;script.onerror=()=>reject(new Error('Module failed: '+module));document.head.append(script);});
+  bootstrap.Modal.prototype._isAnimated=()=>false;bootstrap.Offcanvas.prototype._isAnimated=()=>false;
+  UI.toast=()=>{};UI.confirmProceed=async()=>true;UI.routeMap=()=>{};
+  const role=key=>{App.me={...fixture.users[key],user:{id:1,role:key,full_name:'Fixture user',username:'fixture',role_label:fixture.roles[key]},roles:fixture.roles,truckTypes:fixture.truckTypes,notifications:[],unread:0,map:{routing:false}};App.shell();};
+  App.data=async(page,query)=>{requests.push({page,query});return {};};
+  for(const key of Object.keys(fixture.users)){
+   role(key);
+   for(const route of App.me.routes){
+    assert(!!App.pages[route.id],key+': screen registered for '+route.id);
+    const def=App.pages[route.id],render=def.render;let reached=false;
+    def.render=ctx=>{reached=ctx.page===route.id;};
+    try{history.replaceState(null,'','#'+route.id);await App.route();assert(reached&&App.current.page===route.id,key+': authorized route '+route.id+' reaches renderer');}
+    finally{def.render=render;}
+   }
+   const before=requests.length;history.replaceState(null,'','#not-authorized');await App.route();
+   assert(App.current.page==='_access_denied'&&requests.length===before,key+': unauthorized route denied before page-data request');
+  }
+  role('admin');assert(document.querySelectorAll('.sidebar-nav [data-nav]').length===13,'Executive sidebar remains the approved thirteen items');
+  App.data=async()=>({queue:[],route_rates:[],maintenance:[],incidents:[],funds:[]});
+  history.replaceState(null,'','#head-approvals');await App.route();
+  const approvals=[...document.querySelectorAll('#pageTools button')].find(b=>b.textContent.includes('Department Approvals'));
+  assert(!!approvals,'Management Action Center exposes supplementary department approvals');
+  approvals.click();await App.route();
+  assert(App.current.page==='admin_approvals'&&document.querySelector('#pageBody').textContent.includes('Nothing is waiting'),'Supplementary approvals render through the real router with their original empty queue');
+  role('operations_head');
+  assert(!UI.canGo('admin_approvals')&&UI.canGo('dispatcher-monitoring'),'Operations retains monitoring and cannot navigate to Admin approvals');
+  const clients=[{id:1,company_name:'Fixture A',rate_types:'Container'},{id:2,company_name:'Fixture B',rate_types:'Container'},{id:3,company_name:'Fixture without routes'}];
+  const groups=['Day','Night'].map(shift=>({role:'container_wingvan_dispatcher',shift}));
+  const accounts=groups.map((g,i)=>({...g,id:11+i,full_name:'Fixture '+g.shift}));
+  const mount=document.querySelector('#pageContent');
+  const ctx={page:'trips',query:{},data:{clients,dispatcherGroups:groups,dispatcherAccounts:accounts},el:mount,tools:document.createElement('div'),setTitle(){}};
+  sessionStorage.removeItem('fleetops:operations-planning:1');
+  let submits=0;
+  App.api=async(action,payload)=>{
+   calls.push({action,payload:structuredClone(payload)});
+   if(action==='Routes.selectable')return {routes:payload.client_id==='3'?[]:[{id:+payload.client_id+8,truck_type:'Container',route_ref:'R-'+payload.client_id,origin_label:'Pickup '+payload.client_id,destination_label:'Delivery '+payload.client_id,distance_km:50,rate_amount:2000,rate_type:'Flat'}]};
+   if(action==='Trips.create_batch'){submits++;return {message:'Fixture results',results:payload.rows.map((row,i)=>({request_key:row.request_key,result:submits===1&&i===1?'Not created':'Created',trip_id:submits===1&&i===1?null:100+i,trip_ref:'FIX-'+i,trip_status:'Awaiting Resources'}))};}
+   throw new Error('Unexpected API '+action);
+  };
+  OpsHead.planner(ctx);
+  const set=(name,value)=>{const input=mount.querySelector('[name='+name+']');assert(!!input,'Planner field '+name+' exists');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));};
+  const fill=async(client,qty,shift)=>{
+   set('client_id',client);await pause();set('client_route_id',String(+client+8));
+   assert(mount.querySelector('[name=truck_type]').value==='Container','Approved route derives the truck type');
+   set('scheduled_at',UI.nowManila(120));const value=mount.querySelector('[name=scheduled_at]').value;
+   mount.querySelector('[data-schedule-date]').value=value.split('T')[0];mount.querySelector('[data-schedule-time]').value=value.split('T')[1];
+   set('quantity',qty);set('dispatcher_assignment','container_wingvan_dispatcher:'+shift);set('responsible_dispatcher_id',shift==='Day'?'11':'12');
+   mount.querySelector('[data-planning]').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  };
+  await fill('1',2,'Day');await fill('2',1,'Night');
+  assert(mount.querySelectorAll('[data-edit-batch]').length===2,'Two clients remain independent planning entries');
+  mount.querySelector('[data-review-batch]').click();
+  assert(mount.querySelectorAll('[data-review-entries] [name=container_number]').length===3,'Review expands quantities into three independent trips');
+  assert(!calls.some(c=>c.action==='Trips.create_batch'),'Review does not create or allocate resources');
+  const confirm=mount.querySelector('[data-confirm]');confirm.click();confirm.click();await pause();
+  const first=calls.filter(c=>c.action==='Trips.create_batch');
+  assert(first.length===1&&first[0].payload.rows.length===3,'Double click submits one three-trip batch');
+  const rows=first[0].payload.rows;
+  assert(rows[0].responsible_dispatcher_id==='11'&&rows[2].responsible_dispatcher_id==='12','Each trip retains the selected responsible Dispatcher account');
+  assert(rows[0].dispatcher_assignment.endsWith(':Day')&&rows[2].dispatcher_assignment.endsWith(':Night'),'Group and shift remain independent between clients');
+  assert(rows.every(r=>r.client_route_id&&!r.vehicle_id&&!r.driver_id&&!r.helper_id),'Created drafts retain approved routes and never invent resource assignments');
+  assert(new Set(rows.map(r=>r.request_key)).size===3,'Each trip has an independent idempotency key');
+  mount.querySelector('[data-confirm]').click();await pause();const retry=calls.filter(c=>c.action==='Trips.create_batch').at(-1).payload.rows;
+  assert(retry.length===1&&retry[0].request_key===rows[1].request_key,'Retry sends only the failed trip with its original key');
+  OpsHead.planner(ctx);set('client_id','3');await pause();
+  assert([...mount.querySelector('[name=client_route_id]').options].every(o=>!o.value)&&mount.querySelector('[name=responsible_dispatcher_id]').disabled,'Client without approved routes has no selectable route or Dispatcher account');
+  App.me.user.role='container_wingvan_dispatcher';TripUI.newPage(ctx);
+  assert(mount.textContent.includes('created by Operations Head'),'Dispatcher bookmark cannot reopen trip creation');
+  document.querySelector('#results').textContent=checks.join('\n')+'\nRESULT: '+checks.length+' passed, 0 failed';
+ }catch(error){document.querySelector('#results').textContent=checks.join('\n')+'\nFAIL '+error.stack+'\nRESULT: '+checks.length+' passed, 1 failed';}
+})();
+</script></html>

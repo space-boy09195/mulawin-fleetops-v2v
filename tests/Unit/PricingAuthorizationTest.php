@@ -17,7 +17,7 @@ final class PricingAuthorizationTest extends TestCase {
         self::assertStringContainsString('Verified garage location is not configured', $js);
         self::assertStringContainsString('Effective diesel price is not configured', $js);
         self::assertStringContainsString('efficiency and verified garage', $js);
-        self::assertStringContainsString("'<div class=\"fleet-rate-editor\"'", $js);
+        self::assertStringContainsString('<div class="fleet-rate-editor">', $js);
         self::assertStringContainsString("submit: 'Save & activate rate'", $js);
         self::assertStringContainsString("'Routes.rate_enter'", $js);
         self::assertStringContainsString("'Routes.pricing_estimate'", $js);
@@ -113,7 +113,7 @@ final class PricingAuthorizationTest extends TestCase {
         self::assertStringContainsString("Routing::route(\$p,(int)\$u['id']", $routes);
         self::assertStringContainsString("if(estimate.garage_preview?.garage)", $js);
         self::assertStringContainsString("opts.garagePreview=estimate.garage_preview", $js);
-        self::assertStringContainsString("Garage-to-pickup map unavailable", $js);
+        self::assertStringContainsString("Garage-to-pickup map not ready", $js);
         self::assertStringContainsString("if(o.garagePreview?.garage", $map);
         self::assertStringContainsString("if(pts.length>1)", $map);
     }

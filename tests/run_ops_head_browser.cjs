@@ -21,6 +21,8 @@ const analyticsOnly = process.argv.includes('--analytics-only');
 const componentsOnly = process.argv.includes('--components-only');
 const tablesOnly = process.argv.includes('--tables-only');
 const mapsOnly = process.argv.includes('--maps-only');
+const selectedFixture = process.argv.find(arg => arg.startsWith('--fixture='))?.slice('--fixture='.length);
+if (selectedFixture && !/^[a-z0-9_-]+\.html$/.test(selectedFixture)) throw new Error('Invalid fixture filename.');
 const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
   const id = ++next;
   const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)); }, 20000);
@@ -54,10 +56,11 @@ const send = (method, params = {}, sessionId) => new Promise((resolve, reject) =
         if (text.includes(marker)) return text;
         await sleep(50);
       }
-      throw new Error('Fixture did not complete: ' + file);
+      const status = await evaluate('document.querySelector("#results")?.textContent || "No fixture status"');
+      throw new Error('Fixture did not complete: ' + file + '\n' + status);
     };
     fs.mkdirSync(reports,{recursive:true});
-    for (const file of (mapsOnly?['routes_ui.html']:pricingOnly?['pricing_ui.html']:planningOnly?['ops_head_ui.html']:turnoverOnly?['dispatcher_turnover_ui.html']:monitoringOnly?['dispatcher_monitoring_ui.html']:tablesOnly?['standard_data_table_ui.html']:componentsOnly?['shared_components_ui.html','system_components_ui.html','standard_data_table_ui.html']:analyticsOnly?['ops_analytics_ui.html']:['dispatcher_turnover_ui.html','standard_data_table_ui.html','shared_components_ui.html', 'system_components_ui.html', 'operations_ui.html', 'routes_ui.html', 'ops_head_ui.html', 'dispatcher_monitoring_ui.html', 'trip_approvals_ui.html', 'dispatcher_ui.html', 'ops_reports_ui.html', 'ops_analytics_ui.html'])) {
+    for (const file of (selectedFixture?[selectedFixture]:mapsOnly?['routes_ui.html']:pricingOnly?['pricing_ui.html']:planningOnly?['ops_head_ui.html']:turnoverOnly?['dispatcher_turnover_ui.html']:monitoringOnly?['dispatcher_monitoring_ui.html']:tablesOnly?['standard_data_table_ui.html']:componentsOnly?['shared_components_ui.html','system_components_ui.html','standard_data_table_ui.html']:analyticsOnly?['ops_analytics_ui.html']:['dispatcher_turnover_ui.html','standard_data_table_ui.html','shared_components_ui.html', 'system_components_ui.html', 'operations_ui.html', 'routes_ui.html', 'ops_head_ui.html', 'dispatcher_monitoring_ui.html', 'trip_approvals_ui.html', 'dispatcher_ui.html', 'ops_reports_ui.html', 'ops_analytics_ui.html'])) {
       const result = await navigate(file, 'RESULT:');
       if(file==='dispatcher_ui.html'){fs.mkdirSync(reports,{recursive:true});fs.writeFileSync(path.join(reports,'dispatcher-refinement-checks.txt'),result+'\n');}
       const summary = result.match(/RESULT: \d+ passed, \d+ failed/)?.[0];
@@ -67,7 +70,7 @@ const send = (method, params = {}, sessionId) => new Promise((resolve, reject) =
         process.exitCode=1;
       }
     }
-    if(mapsOnly||pricingOnly){process.stdout.write(report.join('\n')+'\n');return;}
+    if(selectedFixture||mapsOnly||pricingOnly){process.stdout.write(report.join('\n')+'\n');return;}
     if(planningOnly){
       for(const width of [390,820,1440]){
         await send('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:width<600},sessionId);

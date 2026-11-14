@@ -484,7 +484,7 @@ const App = {
     if (UI.WS_PAGES.has(page)) ['open', 'new', 'report'].forEach(k => { if (query[k] !== undefined) { once[k] = query[k]; delete query[k]; } });
     const canon = '#' + page + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
     if (Object.keys(once).length) history.replaceState(null, '', canon);
-    const entry = this.me.nav.find(n => n.id === page);
+    const entry = (this.me.routes || this.me.nav).find(n => n.id === page);
     const nav = entry ? {...entry,label:UI.operationsLabel(entry.label)} : null;
     // FLEETOPS_ACCESS_ANALYTICS_V1: render an explicit denial without requesting restricted page data.
     // The server independently enforces Access::canOpen() and returns HTTP 403 for forbidden data.
@@ -936,7 +936,7 @@ UI.goParts = (spec) => {
   const [main, mem] = String(spec || '').split('#'); const [page, qs] = main.split('?');
   return { page, query: Object.fromEntries(new URLSearchParams(qs || '')), tabs: [...new URLSearchParams(mem || '')] };
 };
-UI.canGo = (spec) => !!spec && !!App.me && (App.me.nav || []).some(n => n.id === UI.goParts(spec).page);
+UI.canGo = (spec) => !!spec && !!App.me && (App.me.routes || App.me.nav || []).some(n => n.id === UI.goParts(spec).page);
 UI.goTo = (spec) => {
   const g = UI.goParts(spec);
   g.tabs.forEach(([k, v]) => sessionStorage.setItem('tab:' + g.page + (k === '_' ? '' : ':' + k), v));
