@@ -848,3 +848,35 @@ a.oh-metric:hover, a.oh-metric:focus-visible { border-color: #277747; background
 /* Route-derived dispatcher team note */
 .oh-trip-planner-modal .oh-simple-planner .oh-dispatcher-team-note{font-size:10.5px;line-height:1.35;color:#5f856d;margin-top:6px;min-height:14px}
 .oh-trip-planner-modal .oh-simple-planner .oh-dispatcher-team-note:empty{display:none}
+
+
+/* Add Trip: unobtrusive queued route summary, only after routes have been added. */
+.oh-trip-planner-modal .oh-planned-routes[hidden]{display:none!important}
+.oh-trip-planner-modal .oh-simple-planner .oh-planned-routes{
+  margin-top:12px;padding:10px 12px 6px;
+  border:1px solid #d8e7dc;border-radius:10px;
+  background:#fcfefc
+}
+.oh-trip-planner-modal .oh-planned-routes-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:3px 2px 9px;border-bottom:1px solid #e3ece5
+}
+.oh-trip-planner-modal .oh-planned-routes-head>span{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:12px;font-weight:750;color:#275d3c
+}
+.oh-trip-planner-modal .oh-planned-routes-head>span>i{color:#278552;font-size:14px}
+.oh-trip-planner-modal .oh-planned-routes-head>small{
+  color:#537b60;font-size:10.5px;white-space:nowrap
+}
+.oh-trip-planner-modal .oh-planned-routes .oh-batch-entry{
+  margin:8px 0 0;padding:9px 10px;background:#fff;
+  border:1px solid #e1ebe4;border-radius:8px
+}
+.oh-trip-planner-modal .oh-planned-routes .oh-batch-entry:last-child{margin-bottom:4px}
+.oh-trip-planner-modal .oh-planned-routes .oh-batch-actions{
+  display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap
+}
+.oh-trip-planner-modal .oh-planned-routes .oh-batch-actions .btn{
+  font-size:10.5px;padding:4px 9px
+}
