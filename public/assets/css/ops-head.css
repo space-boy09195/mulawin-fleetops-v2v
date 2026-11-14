@@ -961,3 +961,133 @@ a.oh-metric:hover, a.oh-metric:focus-visible { border-color: #277747; background
 .oh-trip-planner-modal .oh-route-picker-empty{
   margin:0;padding:13px 11px;color:#718a7b;font-size:11.5px
 }
+
+
+/* Compact Add Trip review: summary and individual rows */
+.oh-trip-planner-modal.oh-trip-review-mode .oh-review-head{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:10px;margin:4px 0 13px
+}
+.oh-trip-planner-modal.oh-trip-review-mode .oh-review-head h2{
+  color:#234f35;font-size:18px;font-weight:750
+}
+.oh-trip-planner-modal.oh-trip-review-mode .oh-review-head>b{
+  padding:6px 10px;border-radius:7px;background:#e9f5ed;
+  color:#31724a;font-size:11px
+}
+.oh-trip-planner-modal .oh-review-summary{
+  background:linear-gradient(115deg,#f3faf5,#fff);
+  border:1px solid #d6e7da;border-radius:12px;overflow:hidden
+}
+.oh-trip-planner-modal .oh-review-summary-heading{
+  display:flex;align-items:center;gap:9px;padding:12px 16px;
+  border-bottom:1px solid #e0ece3;color:#285d3e
+}
+.oh-trip-planner-modal .oh-review-summary-heading>i{font-size:16px;color:#2c8554}
+.oh-trip-planner-modal .oh-review-summary-heading strong{font-size:13px}
+.oh-trip-planner-modal .oh-review-summary-heading>span{
+  margin-left:auto;color:#5f826a;font-size:11px;font-weight:600
+}
+.oh-trip-planner-modal .oh-review-summary-route{padding:13px 16px}
+.oh-trip-planner-modal .oh-review-summary-route+.oh-review-summary-route{border-top:1px solid #e0ece3}
+.oh-trip-planner-modal .oh-review-route-main{
+  display:flex;flex-direction:column;gap:4px;margin-bottom:10px;
+  color:#2a5038
+}
+.oh-trip-planner-modal .oh-review-route-main>strong{font-size:12.5px;font-weight:750}
+.oh-trip-planner-modal .oh-review-route-main>span{
+  font-size:11.5px;line-height:1.45;color:#5b7462;overflow-wrap:anywhere
+}
+.oh-trip-planner-modal .oh-review-route-facts{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px
+}
+.oh-trip-planner-modal .oh-review-route-facts>span{
+  display:flex;align-items:center;gap:7px;min-width:0;
+  font-size:11px;font-weight:600;color:#315d42;overflow-wrap:anywhere
+}
+.oh-trip-planner-modal .oh-review-route-facts>span>i{
+  flex:none;font-size:13px;color:#418961
+}
+.oh-trip-planner-modal .oh-review-route-instructions{
+  display:flex;gap:7px;margin:10px 0 0;color:#587462;
+  font-size:11px;line-height:1.45
+}
+.oh-trip-planner-modal .oh-review-trip-list{margin-top:17px}
+.oh-trip-planner-modal .oh-review-trip-list-head{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:12px;margin-bottom:9px
+}
+.oh-trip-planner-modal .oh-review-trip-list-head h3{
+  font-size:14px;font-weight:750;color:#27583a;margin:0 0 4px
+}
+.oh-trip-planner-modal .oh-review-trip-list-head p{
+  font-size:11px;color:#718779;margin:0
+}
+.oh-trip-planner-modal .oh-review-trip-list-head>span{
+  white-space:nowrap;font-size:11px;color:#4f7b5d;background:#edf7ef;
+  border-radius:7px;padding:6px 9px
+}
+.oh-trip-planner-modal .oh-review-route-group{
+  margin:0 0 12px;padding:9px;border:1px solid #dfe9e1;
+  border-radius:11px;background:#fcfefc
+}
+.oh-trip-planner-modal .oh-review-route-group-head{
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:8px;padding:4px 6px 11px
+}
+.oh-trip-planner-modal .oh-review-route-group-head strong{
+  color:#315a40;font-size:11.5px
+}
+.oh-trip-planner-modal .oh-review-route-group-head span{
+  color:#718677;font-size:10.5px
+}
+.oh-trip-planner-modal .oh-review-trip-row{
+  padding:0;margin:0 0 7px;border:1px solid #dfe9e1;
+  border-radius:9px;background:#fff;overflow:hidden
+}
+.oh-trip-planner-modal .oh-review-trip-row:last-child{margin-bottom:0}
+.oh-trip-planner-modal .oh-review-trip-row>summary{
+  min-height:43px;display:flex;align-items:center;gap:12px;cursor:pointer;
+  list-style:none;padding:10px 12px
+}
+.oh-trip-planner-modal .oh-review-trip-row>summary::-webkit-details-marker{display:none}
+.oh-trip-planner-modal .oh-review-trip-row>summary:hover{background:#f3faf5}
+.oh-trip-planner-modal .oh-review-trip-row[open]>summary{
+  background:#f5faf6;border-bottom:1px solid #e2ede5
+}
+.oh-trip-planner-modal .oh-review-trip-identity{display:flex;align-items:center;gap:9px}
+.oh-trip-planner-modal .oh-review-trip-identity i{font-size:14px;color:#438c5b}
+.oh-trip-planner-modal .oh-review-trip-identity strong{
+  font-size:12px;color:#2a593c
+}
+.oh-trip-planner-modal .oh-review-trip-status{
+  margin-left:auto;font-size:11px;font-weight:500;color:#698374
+}
+.oh-trip-planner-modal .oh-review-trip-chevron{font-size:11px;color:#61896d}
+.oh-trip-planner-modal .oh-review-trip-row[open] .oh-review-trip-chevron{transform:rotate(180deg)}
+.oh-trip-planner-modal .oh-review-trip-fields{padding:12px}
+.oh-trip-planner-modal .oh-review-trip-fields .row{
+  --bs-gutter-x:12px;--bs-gutter-y:9px
+}
+.oh-trip-planner-modal .oh-review-trip-fields .form-label{
+  font-size:11px;font-weight:650;color:#47634d;margin-bottom:4px
+}
+.oh-trip-planner-modal .oh-review-trip-fields .form-control{
+  border-color:#d0dfd3;border-radius:8px;min-height:38px;
+  font-size:12px
+}
+.oh-trip-planner-modal .oh-review-submit-note{
+  margin:12px 2px 6px;font-size:11px;color:#6c8071;line-height:1.5
+}
+@media(max-width:850px){
+  .oh-trip-planner-modal .oh-review-route-facts{
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+}
+@media(max-width:540px){
+  .oh-trip-planner-modal .oh-review-summary-heading,
+  .oh-trip-planner-modal .oh-review-summary-route{padding:11px}
+  .oh-trip-planner-modal .oh-review-route-facts{grid-template-columns:1fr}
+  .oh-trip-planner-modal .oh-review-trip-list-head{flex-wrap:wrap}
+}
