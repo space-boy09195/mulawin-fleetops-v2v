@@ -2551,3 +2551,67 @@ body:is(.operations-head,.dispatcher-role) .fleet-data-table[data-standard-table
   .app-shell.executive-sidebar .sidebar,.app-shell.executive-sidebar .main,
   .app-shell.executive-sidebar .head-nav-chevron{transition:none}
 }
+
+
+/* Executive navigation: bare icon-only collapsed rail */
+.app-shell.executive-sidebar .sidebar-top .sb-collapse{
+  border:0!important;box-shadow:none!important;background:transparent!important;
+  border-radius:0;color:#eaf7ee
+}
+.app-shell.executive-sidebar .sidebar-top .sb-collapse:hover{
+  color:#fff;background:transparent!important
+}
+.app-shell.executive-sidebar .sidebar-top #sbClose{display:none!important}
+@media(min-width:992px){
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-top{
+    gap:4px;min-height:100px;padding:10px 7px
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-top .sb-collapse{
+    margin:0 auto;flex:0 0 26px;width:26px;height:26px;padding:0;
+    font-size:19px
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav{
+    padding:7px 8px 16px;overflow-x:hidden
+  }
+  /* Admin dashboard is a direct link rather than a details group.
+     Hide the ENTIRE label instead of letting it wrap vertically. */
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link,
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-group>.nav-item-link{
+    display:flex;align-items:center;justify-content:center;min-height:46px;
+    width:100%;padding:9px 0;margin:4px 0;gap:0;
+    white-space:nowrap;overflow:hidden;text-align:center;
+    background:transparent;border:0;border-radius:0;box-shadow:none
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link span,
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link .nav-label,
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-group>.nav-item-link span{
+    display:none!important
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link>.bi,
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-group>.nav-item-link>.bi{
+    flex:none;width:auto;font-size:20px;line-height:1.2;
+    margin:0;color:#ebf8ee
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link.active,
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link:hover{
+    color:#c6f0d1;background:transparent!important;box-shadow:none
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link.active>.bi{
+    color:#b4efbe
+  }
+  .app-shell.executive-sidebar.sb-collapsed .sidebar-nav>.nav-item-link.active::before{
+    left:0;top:12px;bottom:12px;width:3px;border-radius:4px;background:#8ae0a2
+  }
+  /* Group icons should also remain unboxed, even when active or expanded. */
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group>summary,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group>summary:hover,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group[open]>summary,
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group:has(.nav-item-link.active)>summary{
+    background:transparent!important;border:0!important;
+    border-radius:0!important;box-shadow:none!important;
+    color:#e6f7e9
+  }
+  .app-shell.executive-sidebar.sb-collapsed .head-nav-group:has(.nav-item-link.active)>summary>i:first-child{
+    color:#b4efbe
+  }
+}
